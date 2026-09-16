@@ -9,3 +9,5 @@ logs/
 *.mp4
 *.log
 .env
+webrec.yaml
+*.local.yaml

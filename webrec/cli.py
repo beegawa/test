@@ -23,6 +23,7 @@ from .config import (
     Config,
     NotifyConfig,
     build_config,
+    format_duration,
     load_config,
     smtp_from_env,
 )
@@ -154,6 +155,7 @@ def cmd_check(args) -> int:
     print("=" * 60)
     print(f"사전 샘플링 점검 ({report.duration}초)")
     print("=" * 60)
+    print(f"대상       : {job.url}")
     print(report.summary())
     print()
 
@@ -195,7 +197,7 @@ def cmd_list(args) -> int:
     print(f"{'작업':<20} {'다음 실행':<22} {'길이':<10} {'방식':<9} 주소")
     print("-" * 100)
     for job, when in rows:
-        length = f"{job.duration // 60}분"
+        length = format_duration(job.duration)
         print(f"{job.name:<20} {when.strftime('%Y-%m-%d %H:%M:%S'):<22} {length:<10} {job.backend:<9} {job.url}")
 
     disabled = [j.name for j in config.jobs if not j.enabled]

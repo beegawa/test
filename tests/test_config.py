@@ -159,3 +159,13 @@ def test_example_config_is_valid(monkeypatch):
     config = load_config(os.path.join(os.path.dirname(__file__), "..", "config.example.yaml"))
     assert len(config.jobs) == 3
     assert config.jobs[0].notify.to == ["travislee@shinwon.com"]
+
+
+@pytest.mark.parametrize("seconds,expected", [
+    (30, "30초"), (90, "1분 30초"), (2400, "40분"), (3600, "1시간"),
+    (5400, "1시간 30분"), (3660, "1시간 1분"), (0, "0초"),
+])
+def test_format_duration(seconds, expected):
+    from webrec.config import format_duration
+
+    assert format_duration(seconds) == expected

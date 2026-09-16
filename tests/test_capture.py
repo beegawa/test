@@ -142,3 +142,15 @@ def test_concat_single_part_just_renames(tmp_path: Path):
     out = tmp_path / "final.mkv"
     assert concat_parts([part], out) == out
     assert out.exists() and not part.exists()
+
+
+@pytest.mark.parametrize("url,expected", [
+    # 웨비나 링크(/w/)도 웹 클라이언트로 변환하고 등록 토큰(tk)을 유지해야 한다
+    ("https://walmart.zoom.us/w/97608310562?tk=ABC&pwd=XYZ&uuid=UU",
+     "https://walmart.zoom.us/wc/join/97608310562?tk=ABC&pwd=XYZ&uuid=UU"),
+    ("https://zoom.us/my/someone", "https://zoom.us/wc/join/someone"),
+])
+def test_zoom_webinar_and_personal_links(url, expected):
+    assert zoom_web_client_url(url) == expected
+    assert plan_for(url).kind == "zoom"
+    assert choose_backend(url, "auto")[0] == "browser"

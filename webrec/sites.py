@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import logging
 import re
+import socket
 import subprocess
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import quote, urlparse, urlsplit, urlunparse
 
 from .errors import CaptureError
 from .tools import browser_path
@@ -20,7 +23,8 @@ from .tools import browser_path
 log = logging.getLogger(__name__)
 
 ZOOM_HOST_RE = re.compile(r"(^|\.)(zoom\.us|zoomgov\.com)$", re.IGNORECASE)
-ZOOM_JOIN_RE = re.compile(r"/(j|wc/join|my)/(?P<id>[A-Za-z0-9._-]+)")
+# 회의(/j/), 웨비나(/w/), 개인 링크(/my/), 이미 변환된 웹 클라이언트 주소(/wc/join/)
+ZOOM_JOIN_RE = re.compile(r"/(wc/join|j|w|my)/(?P<id>[A-Za-z0-9._-]+)")
 
 # yt-dlp 로 직접 스트림 주소를 얻을 수 있는(=stream 백엔드가 유리한) 대표 사이트
 STREAMABLE_HOSTS = (
@@ -29,6 +33,56 @@ STREAMABLE_HOSTS = (
 )
 
 DIRECT_MEDIA_SUFFIXES = (".m3u8", ".mpd", ".mp4", ".ts", ".flv", ".webm")
+
+
+
+# 일반 브라우저처럼 보이게 한다(기본 User-Agent 는 차단하는 사이트가 많다)
+_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+def encode_url(url: str) -> str:
+    """한글 등 ASCII 가 아닌 문자가 든 주소를 퍼센트 인코딩한다."""
+    try:
+        url.encode("ascii")
+        return url
+    except UnicodeEncodeError:
+        parts = urlsplit(url)
+        return parts._replace(
+            path=quote(parts.path, safe="/%:@!$&'()*+,;="),
+            query=quote(parts.query, safe="/%:@!$&'()*+,;=?"),
+            fragment=quote(parts.fragment, safe="/%"),
+        ).geturl()
+
+
+def check_reachable(url: str, *, timeout: int = 15) -> tuple[str, str]:
+    """주소에 실제로 접속되는지 미리 확인한다.
+
+    브라우저 캡처는 페이지가 안 열려도 '에러 페이지'가 녹화되기 때문에
+    화면만 봐서는 실패를 알아채기 어렵다. 그래서 캡처 전에 한 번 찔러본다.
+
+    반환: (등급, 설명). 등급은 "ok" / "warn" / "fail".
+      fail - DNS·연결·프록시·타임아웃 등 아예 접속이 안 되는 경우
+      warn - 접속은 됐지만 4xx/5xx (봇 차단이거나 만료된 링크일 수 있음)
+    """
+    if url.startswith("file://"):
+        return "ok", "로컬 파일"
+
+    request = urllib.request.Request(encode_url(url), method="GET", headers={"User-Agent": _UA})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            response.read(2048)
+            return "ok", f"HTTP {response.status} ({response.url.split('?')[0]})"
+    except urllib.error.HTTPError as exc:
+        return "warn", f"HTTP {exc.code} - 링크가 만료됐거나 자동 접속을 막는 사이트일 수 있습니다"
+    except urllib.error.URLError as exc:
+        return "fail", f"접속 불가: {exc.reason}"
+    except (socket.timeout, TimeoutError):
+        return "fail", f"{timeout}초 안에 응답이 없습니다"
+    except Exception as exc:  # pragma: no cover - 예상 못 한 네트워크 오류
+        return "fail", f"{type(exc).__name__}: {exc}"
 
 
 @dataclass
@@ -59,7 +113,11 @@ def plan_for(url: str) -> SitePlan:
 
 
 def zoom_web_client_url(url: str) -> str:
-    """Zoom 초대 링크를 브라우저 웹 클라이언트 주소(/wc/join/<회의번호>)로 변환."""
+    """Zoom 초대 링크를 브라우저 웹 클라이언트 주소(/wc/join/<번호>)로 변환.
+
+    회의(/j/)와 웨비나(/w/) 모두 지원하며, 등록 토큰(tk)·암호(pwd) 같은
+    쿼리 문자열은 그대로 유지한다(웨비나 입장에 반드시 필요).
+    """
     parsed = urlparse(url)
     match = ZOOM_JOIN_RE.search(parsed.path)
     if not match:
@@ -142,13 +200,25 @@ class BrowserSession:
                 permissions=["camera", "microphone"],
             )
             self._page = context.new_page()
-            log.info("브라우저 접속: %s", self.plan.launch_url)
-            self._page.goto(self.plan.launch_url, wait_until="domcontentloaded", timeout=60_000)
-            return True
         except Exception as exc:
             log.warning("Playwright 실행 실패(%s) - 기본 브라우저 실행으로 대체합니다.", exc)
             self.close()
             return False
+
+        # 페이지 이동 실패는 '대체 실행' 이 아니라 진짜 오류다.
+        # 여기서 넘어가면 브라우저 에러 페이지가 그대로 녹화된다.
+        log.info("브라우저 접속: %s", self.plan.launch_url)
+        try:
+            self._page.goto(self.plan.launch_url, wait_until="domcontentloaded", timeout=60_000)
+        except Exception as exc:
+            self.close()
+            raise CaptureError(f"페이지를 열지 못했습니다: {str(exc).splitlines()[0]}") from exc
+
+        current = (self._page.url or "").lower()
+        if current.startswith("chrome-error://"):
+            self.close()
+            raise CaptureError(f"페이지를 열지 못했습니다(브라우저 오류 화면): {self.plan.launch_url}")
+        return True
 
     def _start_plain(self) -> None:
         executable = browser_path(self.cfg.executable_path)
@@ -208,6 +278,16 @@ class BrowserSession:
                     break
             except Exception:
                 continue
+
+        if self.cfg.email:
+            for selector in ("#input-for-email", "input[name='inputemail']", "input[type='email']"):
+                try:
+                    box = page.locator(selector).first
+                    if box.is_visible(timeout=2_000):
+                        box.fill(self.cfg.email)
+                        break
+                except Exception:
+                    continue
 
         if self.cfg.passcode:
             for selector in ("#input-for-pwd", "input[name='inputpasscode']", "input[type='password']"):

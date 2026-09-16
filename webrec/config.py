@@ -87,6 +87,21 @@ def parse_duration(value: Any, *, field_name: str = "duration", allow_zero: bool
     return int(round(seconds))
 
 
+def format_duration(seconds: int | float) -> str:
+    """초 -> '1시간 30분', '40분', '30초' 처럼 읽기 좋은 문자열."""
+    seconds = int(round(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours}시간")
+    if minutes:
+        parts.append(f"{minutes}분")
+    if secs and not hours:
+        parts.append(f"{secs}초")
+    return " ".join(parts) or "0초"
+
+
 def parse_datetime(value: Any, *, field_name: str = "start") -> datetime:
     """'2026-09-20 21:00' 같은 로컬 시각 문자열 -> naive datetime."""
     if isinstance(value, datetime):
@@ -176,6 +191,7 @@ class BrowserConfig:
     """브라우저 캡처 백엔드 옵션."""
 
     display_name: str = "Recorder"    # Zoom 등에서 사용할 표시 이름
+    email: str | None = None          # Zoom 웨비나 입장 시 요구하는 이메일
     passcode: str | None = None
     page_load_wait: int = 20          # 페이지 로딩 후 대기(초)
     executable_path: str | None = None

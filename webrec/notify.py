@@ -14,7 +14,7 @@ from email.message import EmailMessage
 from email.utils import formataddr, formatdate
 from pathlib import Path
 
-from .config import NotifyConfig, SmtpConfig
+from .config import NotifyConfig, SmtpConfig, format_duration
 from .errors import NotifyError
 
 log = logging.getLogger(__name__)
@@ -138,7 +138,7 @@ def preflight_body(job, report, *, scheduled_at: datetime | None = None) -> str:
         _line("작업", job.name),
         _line("주소", job.url),
         _line("예정 시각", scheduled_at.strftime("%Y-%m-%d %H:%M:%S") if scheduled_at else "-"),
-        _line("녹화 길이", f"{job.duration}초 ({job.duration / 60:.0f}분)"),
+        _line("녹화 길이", format_duration(job.duration)),
         "",
         report.summary(),
     ]
@@ -161,7 +161,7 @@ def started_body(job, *, scheduled_at: datetime | None, output_path: Path, backe
         _line("주소", job.url),
         _line("시작 시각", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
         _line("예정 시각", scheduled_at.strftime("%Y-%m-%d %H:%M:%S") if scheduled_at else "-"),
-        _line("녹화 길이", f"{job.duration}초 ({job.duration / 60:.0f}분)"),
+        _line("녹화 길이", format_duration(job.duration)),
         _line("캡처 방식", backend),
         _line("저장 위치", str(output_path)),
     ])
@@ -178,7 +178,7 @@ def completed_body(job, outcome) -> str:
         _line("주소", job.url),
         _line("저장 파일", str(outcome.output_path)),
         _line("파일 크기", f"{size_mb:.1f} MB"),
-        _line("녹화 길이", f"{metrics.get('duration_sec') or 0:.0f}초 (요청 {job.duration}초)"),
+        _line("녹화 길이", f"{format_duration(metrics.get('duration_sec') or 0)} (요청 {format_duration(job.duration)})"),
         _line("해상도", f"{metrics.get('width')}x{metrics.get('height')}"),
         _line("캡처 방식", outcome.backend),
         _line("재시도", f"{outcome.attempts - 1}회" if outcome.attempts else "0회"),
