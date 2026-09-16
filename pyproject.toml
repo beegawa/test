@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "webrec"
+version = "1.0.0"
+description = "정해진 시간에 Zoom/YouTube 등 웹 라이브를 녹화·저장하고 결과를 메일로 알리는 도구"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+stream = ["yt-dlp>=2024.1.0"]
+browser = ["playwright>=1.40.0"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+webrec = "webrec.cli:main"
+
+[tool.setuptools]
+packages = ["webrec"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
