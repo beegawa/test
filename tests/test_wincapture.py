@@ -180,3 +180,67 @@ def test_linux_still_uses_virtual_display(tmp_path, monkeypatch):
 
     assert "x11grab" in captured["cmd"]
     assert session.call_args.kwargs["display"] == ":99"
+
+
+# ------------------------------------------------- 설치 위치 자동 탐색
+def test_env_override_points_to_file(tmp_path, monkeypatch):
+    """WEBREC_FFMPEG 로 실행 파일을 직접 지정할 수 있다."""
+    from webrec.tools import find_tool
+
+    exe = tmp_path / "ffmpeg"
+    exe.write_text("#!/bin/sh\n")
+    monkeypatch.setenv("WEBREC_FFMPEG", str(exe))
+    assert find_tool("ffmpeg") == str(exe)
+
+
+def test_env_override_points_to_folder(tmp_path, monkeypatch):
+    """폴더를 지정해도 그 안에서 찾아준다."""
+    from webrec.tools import find_tool
+
+    (tmp_path / "ffmpeg.exe").write_text("")
+    monkeypatch.setenv("WEBREC_FFMPEG", str(tmp_path))
+    assert find_tool("ffmpeg") == str(tmp_path / "ffmpeg.exe")
+
+
+def test_finds_ffmpeg_downloaded_into_project(tmp_path, monkeypatch):
+    """설치 스크립트가 프로그램 폴더에 받아둔 ffmpeg 를 PATH 없이도 찾는다."""
+    import webrec.tools as tools
+
+    bundled = tmp_path / "tools" / "ffmpeg" / "bin" / "ffmpeg.exe"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_text("")
+
+    monkeypatch.delenv("WEBREC_FFMPEG", raising=False)
+    monkeypatch.setattr(tools, "_PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(tools.sys, "platform", "win32")
+    monkeypatch.setattr(tools.shutil, "which", lambda name: None)   # PATH 에는 없음
+
+    assert tools.find_tool("ffmpeg") == str(bundled)
+
+
+def test_finds_ffmpeg_installed_by_winget(tmp_path, monkeypatch):
+    """winget 이 버전 폴더에 풀어놓은 ffmpeg 도 찾아낸다."""
+    import webrec.tools as tools
+
+    winget = tmp_path / "Microsoft" / "WinGet" / "Packages" / "Gyan.FFmpeg_1.0" / "ffmpeg-7.0" / "bin"
+    winget.mkdir(parents=True)
+    (winget / "ffmpeg.exe").write_text("")
+
+    monkeypatch.delenv("WEBREC_FFMPEG", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(tools, "_PROJECT_ROOT", tmp_path / "없는폴더")
+    monkeypatch.setattr(tools.sys, "platform", "win32")
+    monkeypatch.setattr(tools.shutil, "which", lambda name: None)
+
+    assert tools.find_tool("ffmpeg") == str(winget / "ffmpeg.exe")
+
+
+def test_missing_tool_message_mentions_installer(monkeypatch):
+    """ffmpeg 가 없을 때 안내가 설치 방법을 알려준다."""
+    import webrec.tools as tools
+    from webrec.errors import ToolMissingError
+
+    monkeypatch.delenv("WEBREC_FFMPEG", raising=False)
+    monkeypatch.setattr(tools, "find_tool", lambda name: None)
+    with pytest.raises(ToolMissingError, match="예약녹화-시작.bat"):
+        tools.ffmpeg_path()

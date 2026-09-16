@@ -31,13 +31,75 @@ _BROWSER_CANDIDATES = (
 )
 
 
+# 프로그램이 설치된 폴더 (여기 tools/ffmpeg 에 직접 받아둘 수도 있다)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _windows_candidates(name: str) -> list[str]:
+    """PATH 에 없어도 흔히 설치되는 Windows 위치들을 훑는다.
+
+    Windows 에서 'ffmpeg 는 깔았는데 PATH 에 안 잡힌다' 가 워낙 흔해서,
+    자동으로 찾아준다.
+    """
+    exe = f"{name}.exe"
+    local = os.environ.get("LOCALAPPDATA", "")
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    program_data = os.environ.get("ProgramData", r"C:\ProgramData")
+    user = os.environ.get("USERPROFILE", "")
+
+    fixed = [
+        _PROJECT_ROOT / "tools" / "ffmpeg" / "bin" / exe,       # 설치 스크립트가 받아둔 것
+        Path(program_files) / "ffmpeg" / "bin" / exe,
+        Path(r"C:\ffmpeg\bin") / exe,
+        Path(program_data) / "chocolatey" / "bin" / exe,
+    ]
+    if local:
+        fixed += [Path(local) / "Microsoft" / "WinGet" / "Links" / exe]
+    if user:
+        fixed += [Path(user) / "scoop" / "shims" / exe]
+
+    found = [str(path) for path in fixed if path.is_file()]
+
+    # winget 은 버전별 폴더에 풀어놓는다: .../WinGet/Packages/Gyan.FFmpeg.../bin/ffmpeg.exe
+    globs = [_PROJECT_ROOT / "tools"]
+    if local:
+        globs.append(Path(local) / "Microsoft" / "WinGet" / "Packages")
+    for base in globs:
+        if not base.is_dir():
+            continue
+        for path in sorted(base.glob(f"**/{exe}"))[:5]:
+            found.append(str(path))
+    return found
+
+
+def find_tool(name: str) -> str | None:
+    """실행 파일을 찾는다. PATH 를 먼저 보고, Windows 는 흔한 설치 위치도 본다."""
+    override = os.environ.get(f"WEBREC_{name.upper()}")
+    if override:
+        candidate = Path(override)
+        if candidate.is_dir():           # 폴더를 줬으면 그 안에서 찾는다
+            for exe in (name, f"{name}.exe"):
+                if (candidate / exe).is_file():
+                    return str(candidate / exe)
+        elif candidate.is_file():
+            return str(candidate)
+
+    path = shutil.which(name)
+    if path:
+        return path
+    if sys.platform.startswith("win"):
+        for found in _windows_candidates(name):
+            return found
+    return None
+
+
 def which(name: str) -> str | None:
-    return shutil.which(name)
+    return find_tool(name)
 
 
 def require(name: str, *, hint: str = "") -> str:
     """필수 도구 경로를 반환하고, 없으면 설치 안내와 함께 오류."""
-    path = shutil.which(name)
+    path = find_tool(name)
     if not path:
         message = f"'{name}' 를 찾을 수 없습니다."
         if hint:
@@ -46,12 +108,18 @@ def require(name: str, *, hint: str = "") -> str:
     return path
 
 
+_FFMPEG_HINT = (
+    "설치: Windows 는 '예약녹화-시작.bat' 을 실행하면 자동으로 설치됩니다. "
+    "리눅스는 sudo apt-get install -y ffmpeg"
+)
+
+
 def ffmpeg_path() -> str:
-    return require("ffmpeg", hint="설치: sudo apt-get install -y ffmpeg")
+    return require("ffmpeg", hint=_FFMPEG_HINT)
 
 
 def ffprobe_path() -> str:
-    return require("ffprobe", hint="설치: sudo apt-get install -y ffmpeg")
+    return require("ffprobe", hint=_FFMPEG_HINT)
 
 
 def ytdlp_path() -> str | None:

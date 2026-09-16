@@ -12,3 +12,4 @@ logs/
 webrec.yaml
 *.local.yaml
 .webrec/
+tools/
