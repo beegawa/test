@@ -1,5 +1,6 @@
 """명령줄 인터페이스.
 
+  webrec serve     브라우저에서 주소·시간을 입력해 예약하는 웹 화면 실행
   webrec run       설정 파일의 예약을 계속 지켜보며 실행 (상시 실행용)
   webrec once      "시간 + 주소" 만 주고 1회 예약 녹화
   webrec check     10초 샘플로 지금 이 주소가 녹화 가능한지 점검
@@ -98,6 +99,37 @@ def _ad_hoc_config(args, *, start: str | None) -> Config:
 
 
 # ------------------------------------------------------------------- 명령들
+def cmd_serve(args) -> int:
+    """브라우저에서 예약을 관리하는 웹 서버를 띄운다."""
+    from .webserver import serve
+
+    log_dir = Path(args.log_dir).expanduser()
+    setup_logging(log_dir, verbose=args.verbose)
+
+    url = f"http://{'127.0.0.1' if args.host in ('', '0.0.0.0') else args.host}:{args.port}"
+    print()
+    print("=" * 60)
+    print("  예약 녹화 웹 화면이 열렸습니다:")
+    print(f"    {url}")
+    print("  종료하려면 이 창에서 Ctrl+C 를 누르세요.")
+    print("=" * 60)
+    print()
+
+    if args.open:
+        import webbrowser
+        import threading
+
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+
+    return serve(
+        host=args.host,
+        port=args.port,
+        data_dir=Path(args.data_dir).expanduser(),
+        output_dir=Path(args.out).expanduser(),
+        log_dir=log_dir,
+    )
+
+
 def cmd_run(args) -> int:
     config = load_or_die(args.config)
     setup_logging(config.log_dir, verbose=args.verbose)
@@ -306,11 +338,22 @@ def build_parser() -> argparse.ArgumentParser:
             "  webrec check --url https://youtube.com/watch?v=xxxx\n"
             "  webrec once  --url https://zoom.us/j/123456?pwd=abc --at '2026-09-20 21:00' --duration 1h30m\n"
             "  webrec run   -c webrec.yaml\n"
+            "  webrec serve --open        # 브라우저에서 예약하기\n"
         ),
     )
     parser.add_argument("--version", action="version", version=f"webrec {__version__}")
     parser.add_argument("-v", "--verbose", action="store_true", help="자세한 로그 출력")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p_serve = sub.add_parser("serve", help="브라우저에서 예약하는 웹 화면 실행")
+    p_serve.add_argument("--host", default="127.0.0.1",
+                         help="접속 허용 주소 (기본 127.0.0.1 = 내 PC 에서만)")
+    p_serve.add_argument("--port", type=int, default=8765, help="포트 (기본 8765)")
+    p_serve.add_argument("--data-dir", default=".webrec", help="예약 목록 저장 폴더")
+    p_serve.add_argument("--out", default="recordings", help="녹화 저장 폴더")
+    p_serve.add_argument("--log-dir", default="logs", help="로그 폴더")
+    p_serve.add_argument("--open", action="store_true", help="브라우저를 자동으로 연다")
+    p_serve.set_defaults(func=cmd_serve)
 
     p_run = sub.add_parser("run", help="설정 파일의 예약을 계속 실행 (상시 실행)")
     p_run.add_argument("-c", "--config", help="설정 파일 경로")

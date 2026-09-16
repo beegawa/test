@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>webrec - 예약 녹화</title>
+<style>
+:root{
+  --bg:#f5f6f8; --card:#fff; --text:#1b1d21; --muted:#6b7280; --line:#e3e6ea;
+  --accent:#2563eb; --accent-text:#fff; --ok:#15803d; --okbg:#dcfce7;
+  --warn:#b45309; --warnbg:#fef3c7; --err:#b91c1c; --errbg:#fee2e2;
+  --run:#1d4ed8; --runbg:#dbeafe;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#15171b; --card:#1e2127; --text:#e8eaed; --muted:#9aa2ad; --line:#2e333b;
+        --accent:#3b82f6; --ok:#4ade80; --okbg:#14361f; --warn:#fbbf24; --warnbg:#3a2c08;
+        --err:#f87171; --errbg:#3d1414; --run:#93c5fd; --runbg:#16294d;}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+     font-family:-apple-system,BlinkMacSystemFont,"Malgun Gothic","Apple SD Gothic Neo",sans-serif;
+     line-height:1.55;font-size:15px}
+.wrap{max-width:960px;margin:0 auto;padding:24px 16px 64px}
+header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+h1{font-size:22px;margin:0}
+h2{font-size:17px;margin:0 0 12px}
+.sub{color:var(--muted);font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+      padding:18px;margin-top:18px}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+input,select,textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;
+      background:var(--bg);color:var(--text);font-size:14px;font-family:inherit}
+input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:12px}
+.row.tight{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
+button{padding:9px 16px;border:1px solid var(--line);border-radius:8px;background:var(--card);
+       color:var(--text);font-size:14px;font-family:inherit;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+button.danger:hover{border-color:var(--err);color:var(--err)}
+button.small{padding:5px 11px;font-size:13px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.chip{padding:4px 10px;font-size:12px;border-radius:999px;border:1px solid var(--line);
+      background:var(--bg);cursor:pointer}
+.badge{display:inline-block;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600}
+.b-ok{background:var(--okbg);color:var(--ok)} .b-run{background:var(--runbg);color:var(--run)}
+.b-err{background:var(--errbg);color:var(--err)} .b-warn{background:var(--warnbg);color:var(--warn)}
+.b-idle{background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+.job{border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+.job h3{margin:0;font-size:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.meta{color:var(--muted);font-size:13px;margin-top:4px;word-break:break-all}
+.actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.bar{height:6px;background:var(--line);border-radius:999px;overflow:hidden;margin-top:10px}
+.bar>div{height:100%;background:var(--accent);width:0;transition:width 1s linear}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px;
+    font-size:12px;overflow-x:auto;margin:8px 0 0;white-space:pre-wrap}
+details summary{cursor:pointer;font-size:13px;color:var(--muted);margin-top:8px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--muted);font-weight:500;font-size:13px}
+a{color:var(--accent)}
+.note{font-size:13px;color:var(--muted);margin-top:8px}
+.empty{color:var(--muted);font-size:14px;padding:12px 0}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#111;color:#fff;
+       padding:11px 20px;border-radius:8px;font-size:14px;opacity:0;pointer-events:none;
+       transition:opacity .25s;max-width:90vw;z-index:9}
+#toast.on{opacity:.95}
+.inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>예약 녹화</h1>
+    <span class="sub" id="headline">불러오는 중...</span>
+  </header>
+
+  <!-- ============ 예약 추가 ============ -->
+  <section class="card">
+    <h2>새 예약</h2>
+    <div class="row" style="grid-template-columns:1fr">
+      <div>
+        <label for="url">녹화할 주소 (Zoom / YouTube 라이브 등)</label>
+        <input id="url" placeholder="https://zoom.us/j/1234567890?pwd=... 또는 https://youtube.com/watch?v=...">
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="repeat">반복</label>
+        <select id="repeat">
+          <option value="once">1회만</option>
+          <option value="daily">매일</option>
+          <option value="weekly">매주</option>
+          <option value="cron">직접 입력 (cron)</option>
+        </select>
+      </div>
+      <div id="wrap-start">
+        <label for="start">시작 시각</label>
+        <input id="start" type="datetime-local">
+      </div>
+      <div id="wrap-time" style="display:none">
+        <label for="time">시작 시각</label>
+        <input id="time" type="time" value="09:00">
+      </div>
+      <div id="wrap-weekday" style="display:none">
+        <label for="weekday">요일</label>
+        <select id="weekday">
+          <option value="mon">월요일</option><option value="tue">화요일</option>
+          <option value="wed">수요일</option><option value="thu">목요일</option>
+          <option value="fri">금요일</option><option value="sat">토요일</option>
+          <option value="sun">일요일</option>
+        </select>
+      </div>
+      <div id="wrap-cron" style="display:none">
+        <label for="cron">cron (분 시 일 월 요일)</label>
+        <input id="cron" placeholder="0 9 * * mon,wed">
+      </div>
+      <div>
+        <label for="duration">녹화 길이</label>
+        <input id="duration" value="1h" placeholder="1h30m 또는 90m">
+        <div class="chips">
+          <span class="chip" data-dur="30m">30분</span><span class="chip" data-dur="1h">1시간</span>
+          <span class="chip" data-dur="1h30m">1시간 30분</span><span class="chip" data-dur="2h">2시간</span>
+        </div>
+      </div>
+    </div>
+    <div class="sub" id="preview"></div>
+
+    <details>
+      <summary>고급 설정 (이름 · Zoom 입장 정보 · 화질 · 사전 점검)</summary>
+      <div class="row" style="margin-top:12px">
+        <div><label for="name">이름 (파일명에 사용)</label><input id="name" placeholder="비우면 자동"></div>
+        <div>
+          <label for="backend">캡처 방식</label>
+          <select id="backend">
+            <option value="auto">자동 (주소 보고 선택)</option>
+            <option value="stream">스트림 직접 저장 (YouTube 등)</option>
+            <option value="browser">브라우저 화면 캡처 (Zoom 등)</option>
+          </select>
+        </div>
+        <div><label for="notify_to">결과 알림 메일</label><input id="notify_to" placeholder="자동"></div>
+      </div>
+      <div class="row">
+        <div><label for="display_name">Zoom 표시 이름</label><input id="display_name" placeholder="Recorder"></div>
+        <div><label for="email">Zoom 이메일 (웨비나)</label><input id="email" placeholder="선택"></div>
+        <div><label for="passcode">Zoom 암호</label><input id="passcode" placeholder="선택"></div>
+      </div>
+      <div class="row tight">
+        <div>
+          <label for="resolution">해상도</label>
+          <select id="resolution">
+            <option>1280x720</option><option>1920x1080</option><option>854x480</option>
+          </select>
+        </div>
+        <div><label for="fps">프레임</label><input id="fps" type="number" value="25" min="5" max="60"></div>
+        <div><label for="preflight_duration">샘플 점검(초)</label>
+             <input id="preflight_duration" type="number" value="10" min="3" max="60"></div>
+        <div><label for="preflight_lead">몇 분 전 점검</label>
+             <input id="preflight_lead" type="number" value="5" min="0" max="120"></div>
+      </div>
+      <div class="row tight">
+        <div class="inline"><input type="checkbox" id="audio" checked style="width:auto"><label for="audio" style="margin:0">소리 녹음</label></div>
+        <div class="inline"><input type="checkbox" id="remux_mp4" style="width:auto"><label for="remux_mp4" style="margin:0">끝나면 mp4 변환</label></div>
+        <div class="inline"><input type="checkbox" id="preflight_enabled" checked style="width:auto"><label for="preflight_enabled" style="margin:0">사전 점검 사용</label></div>
+        <div class="inline"><input type="checkbox" id="abort_on_failure" style="width:auto"><label for="abort_on_failure" style="margin:0">점검 실패 시 취소</label></div>
+      </div>
+    </details>
+
+    <div class="actions">
+      <button class="primary" id="add">예약 등록</button>
+      <span class="sub" id="add-msg"></span>
+    </div>
+  </section>
+
+  <!-- ============ 예약 목록 ============ -->
+  <section class="card">
+    <h2>예약 목록</h2>
+    <div id="jobs"><div class="empty">아직 예약이 없습니다.</div></div>
+  </section>
+
+  <!-- ============ 녹화 파일 ============ -->
+  <section class="card">
+    <h2>녹화된 파일</h2>
+    <div id="files"><div class="empty">아직 없습니다.</div></div>
+    <div class="note" id="outdir"></div>
+  </section>
+
+  <!-- ============ 메일 설정 ============ -->
+  <section class="card">
+    <h2>메일 설정</h2>
+    <div class="sub" id="mail-state"></div>
+    <div class="row" style="margin-top:12px">
+      <div><label for="smtp_host">SMTP 서버</label><input id="smtp_host" placeholder="smtp.gmail.com"></div>
+      <div><label for="smtp_port">포트</label><input id="smtp_port" type="number" value="587"></div>
+      <div><label for="smtp_user">계정</label><input id="smtp_user" placeholder="you@gmail.com"></div>
+    </div>
+    <div class="row">
+      <div><label for="smtp_pass">비밀번호 (Gmail 은 앱 비밀번호)</label>
+           <input id="smtp_pass" type="password" placeholder="비우면 기존 값 유지"></div>
+      <div><label for="smtp_from">발신 주소</label><input id="smtp_from" placeholder="비우면 계정과 동일"></div>
+      <div><label for="mail_to">받는 주소</label><input id="mail_to"></div>
+    </div>
+    <div class="actions">
+      <button class="primary" id="save-mail">저장</button>
+      <button id="test-mail">테스트 메일 보내기</button>
+    </div>
+    <div class="note">비밀번호는 이 PC 의 <code>jobs.json</code> 에 저장됩니다(본인만 읽기). 환경변수 SMTP_HOST/SMTP_USER/SMTP_PASS 를 쓰면 저장하지 않아도 됩니다.</div>
+  </section>
+
+  <div class="note" id="tools"></div>
+</div>
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let STATE = null;
+
+function toast(text, isError) {
+  const el = $("toast");
+  el.textContent = text;
+  el.style.background = isError ? "#b91c1c" : "#111";
+  el.classList.add("on");
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove("on"), 3200);
+}
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ("요청 실패 (" + res.status + ")"));
+  return data;
+}
+
+// ---------------------------------------------------------------- 시간 표시
+function fmtTime(iso) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const time = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  if (sameDay) return "오늘 " + time;
+  return (d.getMonth() + 1) + "/" + d.getDate() + " " + time;
+}
+function fmtSize(bytes) {
+  if (!bytes) return "-";
+  const mb = bytes / 1048576;
+  return mb >= 1024 ? (mb / 1024).toFixed(2) + " GB" : mb.toFixed(1) + " MB";
+}
+function parseDuration(text) {   // "1h30m" / "90m" / "90" -> 초
+  text = (text || "").trim().toLowerCase();
+  if (/^\d+$/.test(text)) return parseInt(text, 10) * 60;   // 숫자만 = 분
+  const m = text.match(/^(?:(\d+(?:\.\d+)?)h)?\s*(?:(\d+(?:\.\d+)?)m)?\s*(?:(\d+(?:\.\d+)?)s)?$/);
+  if (!m || !(m[1] || m[2] || m[3])) return null;
+  return Math.round((+m[1] || 0) * 3600 + (+m[2] || 0) * 60 + (+m[3] || 0));
+}
+function fmtDur(sec) {
+  if (!sec) return "-";
+  const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+  const parts = [];
+  if (h) parts.push(h + "시간");
+  if (m) parts.push(m + "분");
+  if (!parts.length) parts.push(sec + "초");
+  return parts.join(" ");
+}
+
+const WEEKDAYS = { mon: "월", tue: "화", wed: "수", thu: "목", fri: "금", sat: "토", sun: "일",
+                   1: "월", 2: "화", 3: "수", 4: "목", 5: "금", 6: "토", 0: "일", 7: "일" };
+function fmtCron(cron) {                       // "0 9 * * mon" -> "매주 월요일 09:00"
+  const f = (cron || "").trim().split(/\s+/);
+  if (f.length !== 5) return cron;
+  const [min, hour, day, month, week] = f;
+  if (!/^\d+$/.test(min) || !/^\d+$/.test(hour)) return cron;
+  const at = String(hour).padStart(2, "0") + ":" + String(min).padStart(2, "0");
+  if (day === "*" && month === "*") {
+    if (week === "*") return `매일 ${at}`;
+    const names = week.split(",").map((w) => WEEKDAYS[w.toLowerCase()] || w);
+    if (names.every(Boolean)) return `매주 ${names.join("·")}요일 ${at}`;
+  }
+  return `${cron} (${at})`;
+}
+
+// ---------------------------------------------------------------- 예약 폼
+function repeatMode() { return $("repeat").value; }
+function syncForm() {
+  const mode = repeatMode();
+  $("wrap-start").style.display = mode === "once" ? "" : "none";
+  $("wrap-time").style.display = (mode === "daily" || mode === "weekly") ? "" : "none";
+  $("wrap-weekday").style.display = mode === "weekly" ? "" : "none";
+  $("wrap-cron").style.display = mode === "cron" ? "" : "none";
+  updatePreview();
+}
+function updatePreview() {
+  const sec = parseDuration($("duration").value);
+  if (!sec) { $("preview").textContent = "녹화 길이를 '1h30m' 또는 '90m' 형식으로 입력하세요."; return; }
+  let text = "길이 " + fmtDur(sec);
+  if (repeatMode() === "once" && $("start").value) {
+    const start = new Date($("start").value);
+    const end = new Date(start.getTime() + sec * 1000);
+    const hhmm = (d) => String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    text = `${start.getMonth() + 1}/${start.getDate()} ${hhmm(start)} ~ ${hhmm(end)} (${fmtDur(sec)})`;
+  }
+  $("preview").textContent = text;
+}
+function buildPayload() {
+  const mode = repeatMode();
+  const payload = {
+    url: $("url").value.trim(),
+    duration: $("duration").value.trim(),
+    name: $("name").value.trim(),
+    backend: $("backend").value,
+    repeat: mode === "once" ? "once" : "cron",
+    notify_to: $("notify_to").value.trim(),
+    display_name: $("display_name").value.trim(),
+    email: $("email").value.trim(),
+    passcode: $("passcode").value.trim(),
+    resolution: $("resolution").value,
+    fps: +$("fps").value,
+    audio: $("audio").checked,
+    remux_mp4: $("remux_mp4").checked,
+    preflight_enabled: $("preflight_enabled").checked,
+    preflight_duration: +$("preflight_duration").value,
+    preflight_lead: (+$("preflight_lead").value) * 60,
+    abort_on_failure: $("abort_on_failure").checked,
+  };
+  if (mode === "once") {
+    payload.start = $("start").value;
+  } else if (mode === "cron") {
+    payload.cron = $("cron").value.trim();
+  } else {
+    const [h, m] = ($("time").value || "09:00").split(":");
+    payload.cron = `${+m} ${+h} * * ` + (mode === "weekly" ? $("weekday").value : "*");
+  }
+  return payload;
+}
+
+// ---------------------------------------------------------------- 화면 그리기
+function badgeClass(status) {
+  if (status === "완료") return "b-ok";
+  if (status === "실패" || status === "놓침") return "b-err";
+  if (["점검중", "대기중", "녹화중", "검증중"].includes(status)) return "b-run";
+  if (status === "중지됨") return "b-warn";
+  return "b-idle";
+}
+
+function renderJobs(jobs) {
+  const box = $("jobs");
+  if (!jobs.length) { box.innerHTML = '<div class="empty">아직 예약이 없습니다.</div>'; return; }
+  box.innerHTML = jobs.map((job) => {
+    const last = (job.runs || [])[0];
+    let progress = "";
+    if (job.status === "녹화중" && job.started_at && job.duration_sec) {
+      const elapsed = (Date.now() - new Date(job.started_at).getTime()) / 1000;
+      const pct = Math.max(0, Math.min(100, (elapsed / job.duration_sec) * 100));
+      const left = Math.max(0, job.duration_sec - elapsed);
+      progress = `<div class="bar"><div style="width:${pct.toFixed(1)}%"></div></div>
+                  <div class="meta">녹화 중 · 남은 시간 약 ${fmtDur(Math.round(left))}</div>`;
+    }
+    const when = job.cron
+      ? `${esc(fmtCron(job.cron))} · 다음 ${fmtTime(job.next_run)}`
+      : `${fmtTime(job.next_run || job.start)} 시작`;
+    const resultBlock = last ? `
+      <details>
+        <summary>${last.kind} 결과 · ${last.ok ? "정상" : "실패"} (${fmtTime(last.at)})</summary>
+        ${last.error ? `<pre>${esc(last.error)}</pre>` : ""}
+        ${last.summary ? `<pre>${esc(last.summary)}</pre>` : ""}
+        ${last.file ? `<div class="meta">파일: <a href="/recordings/${encodeURIComponent(last.file)}">${esc(last.file)}</a> (${fmtSize(last.size_bytes)})</div>` : ""}
+      </details>` : "";
+    return `<div class="job">
+      <h3>${esc(job.name)} <span class="badge ${badgeClass(job.status)}">${job.status}</span></h3>
+      <div class="meta">${esc(job.url)}</div>
+      <div class="meta">${when} · 길이 ${job.duration_label || "-"} ·
+        ${job.preflight && job.preflight.enabled
+          ? `${job.preflight.duration}초 사전 점검 (${Math.round(job.preflight.lead_seconds / 60)}분 전)`
+          : "사전 점검 없음"}</div>
+      ${job.message ? `<div class="meta">${esc(job.message)}</div>` : ""}
+      ${job.error ? `<div class="meta" style="color:var(--err)">${esc(job.error)}</div>` : ""}
+      ${progress}
+      ${resultBlock}
+      <div class="actions">
+        <button class="small" onclick="act('${job.id}','check')">지금 10초 점검</button>
+        <button class="small" onclick="act('${job.id}','${job.enabled ? "pause" : "resume"}')">${job.enabled ? "일시중지" : "재개"}</button>
+        <button class="small danger" onclick="removeJob('${job.id}')">삭제</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function renderFiles(files) {
+  const box = $("files");
+  if (!files.length) { box.innerHTML = '<div class="empty">아직 없습니다.</div>'; return; }
+  box.innerHTML = `<table><tr><th>파일</th><th>크기</th><th>시각</th><th></th></tr>` +
+    files.map((f) => `<tr>
+      <td><a href="${f.url}" target="_blank">${esc(f.name)}</a></td>
+      <td>${fmtSize(f.size_bytes)}</td>
+      <td>${fmtTime(f.modified)}</td>
+      <td><a href="${f.url}" download>다운로드</a></td>
+    </tr>`).join("") + `</table>`;
+}
+
+function esc(text) {
+  return String(text == null ? "" : text).replace(/[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function render(state) {
+  STATE = state;
+  const active = state.jobs.filter((j) => ["점검중", "대기중", "녹화중", "검증중"].includes(j.status));
+  $("headline").textContent =
+    `예약 ${state.jobs.length}건` + (active.length ? ` · 진행 중 ${active.length}건` : "") +
+    ` · 메일 ${state.mail.configured ? "설정됨" : "미설정"}`;
+  renderJobs(state.jobs);
+  renderFiles(state.recordings);
+  $("outdir").textContent = "저장 폴더: " + state.output_dir;
+
+  const t = state.tools;
+  const missing = Object.entries(t).filter(([, v]) => !v).map(([k]) => k);
+  $("tools").textContent = missing.length
+    ? "설치되지 않은 도구: " + missing.join(", ") + " (ffmpeg 는 필수, 나머지는 방식에 따라 필요)"
+    : "필요한 도구가 모두 준비되어 있습니다.";
+
+  if (!$("mail_to").value) $("mail_to").value = state.mail.to || "";
+  if (!$("smtp_host").value) $("smtp_host").value = state.mail.host || "";
+  if (!$("smtp_user").value) $("smtp_user").value = state.mail.username || "";
+  if (state.mail.port) $("smtp_port").value = state.mail.port;
+  $("mail-state").textContent = state.mail.configured
+    ? `설정됨 · ${state.mail.host}:${state.mail.port} · 결과는 ${state.mail.to} 로 갑니다.`
+    : "아직 설정되지 않았습니다. 설정 전에는 결과가 화면에만 표시되고 메일은 가지 않습니다.";
+}
+
+// ---------------------------------------------------------------- 동작
+async function refresh() {
+  try { render(await api("/api/state")); }
+  catch (err) { $("headline").textContent = "서버에 연결할 수 없습니다: " + err.message; }
+}
+async function act(id, action) {
+  try {
+    const res = await api(`/api/jobs/${id}/${action}`, { method: "POST" });
+    if (res.message) toast(res.message);
+    refresh();
+  } catch (err) { toast(err.message, true); }
+}
+async function removeJob(id) {
+  if (!confirm("이 예약을 삭제할까요?")) return;
+  try { await api(`/api/jobs/${id}`, { method: "DELETE" }); toast("삭제했습니다."); refresh(); }
+  catch (err) { toast(err.message, true); }
+}
+
+$("add").onclick = async () => {
+  const payload = buildPayload();
+  if (!payload.url) return toast("녹화할 주소를 입력하세요.", true);
+  if (!parseDuration(payload.duration)) return toast("녹화 길이 형식을 확인하세요. (예: 1h30m)", true);
+  $("add").disabled = true;
+  try {
+    const job = await api("/api/jobs", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    toast(`'${job.name}' 예약이 등록되었습니다.`);
+    $("url").value = ""; $("name").value = "";
+    refresh();
+  } catch (err) { toast(err.message, true); }
+  finally { $("add").disabled = false; }
+};
+
+$("save-mail").onclick = async () => {
+  try {
+    await api("/api/settings", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        smtp: {
+          host: $("smtp_host").value.trim(), port: +$("smtp_port").value,
+          username: $("smtp_user").value.trim(), password: $("smtp_pass").value,
+          sender: $("smtp_from").value.trim(), starttls: true,
+        },
+        notify_to: $("mail_to").value.trim(),
+      }),
+    });
+    $("smtp_pass").value = "";
+    toast("메일 설정을 저장했습니다.");
+    refresh();
+  } catch (err) { toast(err.message, true); }
+};
+
+$("test-mail").onclick = async () => {
+  try { toast((await api("/api/test-mail", { method: "POST" })).message); }
+  catch (err) { toast(err.message, true); }
+};
+
+$("repeat").onchange = syncForm;
+$("duration").oninput = updatePreview;
+$("start").oninput = updatePreview;
+document.querySelectorAll(".chip").forEach((chip) => {
+  chip.onclick = () => { $("duration").value = chip.dataset.dur; updatePreview(); };
+});
+
+// 기본 시작 시각 = 다음 정시
+(function initStart() {
+  const d = new Date(Date.now() + 3600000);
+  d.setMinutes(0, 0, 0);
+  const pad = (n) => String(n).padStart(2, "0");
+  $("start").value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+})();
+
+syncForm();
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

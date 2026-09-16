@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 from .capture import capture, choose_backend, remux_to_mp4
 from .errors import WebrecError
@@ -70,10 +71,28 @@ class JobOutcome:
 class JobRunner:
     """하나의 Job 을 한 번 실행한다."""
 
-    def __init__(self, job, mailer: Mailer, *, log_dir: Path | None = None):
+    def __init__(
+        self,
+        job,
+        mailer: Mailer,
+        *,
+        log_dir: Path | None = None,
+        progress: Callable[[str, "JobOutcome"], None] | None = None,
+    ):
         self.job = job
         self.mailer = mailer
         self.log_dir = Path(log_dir) if log_dir else None
+        self._progress = progress
+
+    def _stage(self, outcome: "JobOutcome", stage: str) -> None:
+        """진행 단계를 기록하고(웹 UI 등에) 알린다."""
+        outcome.stage = stage
+        if self._progress is None:
+            return
+        try:
+            self._progress(stage, outcome)
+        except Exception:  # 진행 알림 실패가 녹화를 막으면 안 된다
+            log.exception("진행 상태 알림 중 오류")
 
     # --------------------------------------------------------------- 알림
     def _notify(self, event: str, subject: str, body: str, *, attach: Path | None = None) -> None:
@@ -133,7 +152,7 @@ class JobRunner:
 
         # 1) 사전 점검
         if job.preflight.enabled and not skip_preflight:
-            outcome.stage = "사전 점검"
+            self._stage(outcome, "사전 점검")
             try:
                 outcome.preflight = self.preflight(scheduled_at=scheduled_at)
             except Exception as exc:  # 점검 자체가 터져도 본 녹화는 시도한다
@@ -142,7 +161,7 @@ class JobRunner:
 
             if outcome.preflight and not outcome.preflight.ok:
                 if job.preflight.abort_on_failure:
-                    outcome.stage = "사전 점검"
+                    self._stage(outcome, "사전 점검")
                     outcome.error = f"사전 점검 실패로 녹화를 취소했습니다: {outcome.preflight.error}"
                     outcome.finished_at = datetime.now()
                     self._notify(
@@ -158,7 +177,7 @@ class JobRunner:
 
         # 2) 예약 시각까지 대기
         if scheduled_at is not None:
-            outcome.stage = "대기"
+            self._stage(outcome, "대기")
             self._sleep_until(scheduled_at)
 
         # 3) 본 녹화
@@ -166,7 +185,7 @@ class JobRunner:
         outcome.started_at = start_time
         out_path = self.output_path(start_time)
         ffmpeg_log = self.ffmpeg_log_path(start_time)
-        outcome.stage = "녹화"
+        self._stage(outcome, "녹화")
 
         self._notify(
             "started",
@@ -189,7 +208,7 @@ class JobRunner:
 
         # 4) 결과 검증
         if outcome.error is None and outcome.output_path:
-            outcome.stage = "검증"
+            self._stage(outcome, "검증")
             try:
                 outcome.verification = verify_recording(
                     outcome.output_path,
@@ -207,7 +226,7 @@ class JobRunner:
 
         # 5) 후처리 (mp4 변환)
         if outcome.error is None and job.remux_mp4 and outcome.output_path:
-            outcome.stage = "변환"
+            self._stage(outcome, "변환")
             try:
                 outcome.output_path = remux_to_mp4(outcome.output_path)
             except Exception as exc:
@@ -215,7 +234,8 @@ class JobRunner:
 
         outcome.finished_at = datetime.now()
         outcome.ok = outcome.error is None
-        outcome.stage = "완료" if outcome.ok else outcome.stage
+        if outcome.ok:
+            self._stage(outcome, "완료")
 
         if outcome.ok:
             log.info("[%s] 녹화 완료: %s", job.name, outcome.output_path)

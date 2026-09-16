@@ -21,5 +21,8 @@ webrec = "webrec.cli:main"
 [tool.setuptools]
 packages = ["webrec"]
 
+[tool.setuptools.package-data]
+webrec = ["static/*.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
