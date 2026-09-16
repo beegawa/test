@@ -134,7 +134,7 @@ class BrowserSession:
     kiosk 모드로 실행만 한다(암호 없는 공개 라이브에는 이것으로 충분하다).
     """
 
-    def __init__(self, plan: SitePlan, *, display: str, video, browser_cfg):
+    def __init__(self, plan: SitePlan, *, display: str | None, video, browser_cfg):
         self.plan = plan
         self.display = display
         self.video = video
@@ -189,8 +189,9 @@ class BrowserSession:
             launch_kwargs = {
                 "headless": False,  # 화면을 캡처해야 하므로 반드시 headed
                 "args": self._chrome_args(),
-                "env": {"DISPLAY": self.display},
             }
+            if self.display:  # 리눅스 가상 화면. Windows/Mac 은 실제 화면을 쓴다
+                launch_kwargs["env"] = {"DISPLAY": self.display}
             executable = self.cfg.executable_path or browser_path()
             if executable:
                 launch_kwargs["executable_path"] = executable
@@ -229,11 +230,11 @@ class BrowserSession:
             )
         cmd = [executable] + self._chrome_args() + [self.plan.launch_url]
         log.info("브라우저 실행: %s", executable)
+        env = _clean_env()
+        if self.display:
+            env["DISPLAY"] = self.display
         self._proc = subprocess.Popen(
-            cmd,
-            env={**_clean_env(), "DISPLAY": self.display},
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
 
     # ------------------------------------------------------------ 사이트 입장

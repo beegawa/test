@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from .errors import ToolMissingError
@@ -20,6 +21,13 @@ _BROWSER_CANDIDATES = (
     "chromium-browser",
     "google-chrome",
     "google-chrome-stable",
+    # Windows 기본 설치 경로 (Chrome -> Edge 순)
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+    "chrome",
+    "msedge",
 )
 
 
@@ -110,12 +118,19 @@ def ffprobe_json(path: str | Path, *, timeout: int = 60) -> dict:
 
 
 def tool_report() -> dict[str, str | None]:
-    """현재 환경에서 사용 가능한 도구 목록 (진단용)."""
-    return {
+    """현재 환경에서 사용 가능한 도구 목록 (진단용).
+
+    운영체제마다 필요한 것이 다르므로 해당 OS 에서 쓰는 것만 보여준다.
+    (자주 호출되므로 여기서는 빠른 확인만 한다)
+    """
+    report: dict[str, str | None] = {
         "ffmpeg": which("ffmpeg"),
         "ffprobe": which("ffprobe"),
         "yt-dlp": ytdlp_path(),
-        "Xvfb": xvfb_path(),
         "browser": browser_path(),
-        "pulseaudio": which("pulseaudio") or which("pipewire-pulse"),
     }
+    if sys.platform.startswith("win"):
+        return report
+    report["Xvfb"] = xvfb_path()
+    report["pulseaudio"] = which("pulseaudio") or which("pipewire-pulse")
+    return report

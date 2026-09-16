@@ -21,6 +21,7 @@ from pathlib import Path
 from .errors import CaptureError
 from .display import PulseSink, VirtualDisplay
 from .sites import BrowserSession, SitePlan, plan_for
+from .wincapture import build_gdigrab_command, find_loopback_device, is_windows
 from .tools import ffmpeg_path, run, ytdlp_path
 
 log = logging.getLogger(__name__)
@@ -319,21 +320,38 @@ def capture(
     return _capture_stream(job, out_path, duration, log_file, retries)
 
 
-def _capture_stream(job, out_path: Path, duration: int, log_file: Path | None, retries: int) -> CaptureResult:
+def _record_loop(
+    job,
+    out_path: Path,
+    duration: int,
+    log_file: Path | None,
+    retries: int,
+    make_cmd,
+    *,
+    env: dict | None = None,
+) -> tuple[list[Path], int, float, str, int]:
+    """끊기면 남은 시간만큼 다시 붙는 공통 녹화 루프.
+
+    make_cmd(파일경로, 남은초) -> ffmpeg 명령
+    반환: (조각들, 시도횟수, 총경과, stderr 끝부분, 마지막 종료코드)
+    """
     parts: list[Path] = []
-    remaining = duration
     attempts = 0
     total_elapsed = 0.0
     stderr_tail = ""
     returncode = 0
+    remaining = duration
 
     while remaining > 2 and attempts <= retries:
         attempts += 1
-        part_path = out_path if attempts == 1 else out_path.with_name(f"{out_path.stem}.part{attempts}{out_path.suffix}")
-        urls = resolve_stream_urls(job.url)
-        cmd = build_stream_command(urls, part_path, int(remaining), job.video)
+        part_path = (
+            out_path if attempts == 1
+            else out_path.with_name(f"{out_path.stem}.part{attempts}{out_path.suffix}")
+        )
+        cmd = make_cmd(part_path, int(remaining))
         returncode, elapsed, stderr_tail = run_ffmpeg(
-            cmd, part_path, int(remaining), stall_timeout=job.stall_timeout, log_file=log_file
+            cmd, part_path, int(remaining), stall_timeout=job.stall_timeout,
+            log_file=log_file, env=env,
         )
         total_elapsed += elapsed
         captured = recorded_seconds(part_path)
@@ -341,7 +359,6 @@ def _capture_stream(job, out_path: Path, duration: int, log_file: Path | None, r
             parts.append(part_path)
 
         if captured >= remaining * _MIN_COMPLETE_RATIO:
-            remaining = 0
             break
 
         remaining -= captured
@@ -352,17 +369,23 @@ def _capture_stream(job, out_path: Path, duration: int, log_file: Path | None, r
             )
             time.sleep(job.retry_delay)
 
+    return parts, attempts, total_elapsed, stderr_tail, returncode
+
+
+def _finish(
+    parts: list[Path], out_path: Path, backend: str, duration: int,
+    attempts: int, elapsed: float, stderr_tail: str, returncode: int,
+) -> CaptureResult:
     if not parts:
         raise CaptureError(
             f"녹화 파일이 만들어지지 않았습니다. ffmpeg 종료코드 {returncode}\n{stderr_tail[-800:]}"
         )
-
     final = concat_parts(parts, out_path)
     return CaptureResult(
         path=final,
-        backend="stream",
+        backend=backend,
         requested_duration=duration,
-        elapsed=total_elapsed,
+        elapsed=elapsed,
         attempts=attempts,
         parts=parts if len(parts) > 1 else [],
         stderr_tail=stderr_tail,
@@ -370,59 +393,68 @@ def _capture_stream(job, out_path: Path, duration: int, log_file: Path | None, r
     )
 
 
+def _capture_stream(job, out_path: Path, duration: int, log_file: Path | None, retries: int) -> CaptureResult:
+    def make_cmd(part_path: Path, remaining: int) -> list[str]:
+        # 재시도할 때마다 주소를 다시 얻는다(라이브 주소는 만료된다)
+        return build_stream_command(resolve_stream_urls(job.url), part_path, remaining, job.video)
+
+    parts, attempts, elapsed, stderr_tail, code = _record_loop(
+        job, out_path, duration, log_file, retries, make_cmd
+    )
+    return _finish(parts, out_path, "stream", duration, attempts, elapsed, stderr_tail, code)
+
+
 def _capture_browser(
     job, site: SitePlan, out_path: Path, duration: int, log_file: Path | None, retries: int
 ) -> CaptureResult:
-    parts: list[Path] = []
-    attempts = 0
-    total_elapsed = 0.0
-    stderr_tail = ""
-    returncode = 0
-    remaining = duration
+    """브라우저를 띄워 화면을 담는다. 운영체제에 따라 방식이 다르다."""
+    if is_windows():
+        return _capture_browser_windows(job, site, out_path, duration, log_file, retries)
+    return _capture_browser_x11(job, site, out_path, duration, log_file, retries)
 
+
+def _capture_browser_x11(
+    job, site: SitePlan, out_path: Path, duration: int, log_file: Path | None, retries: int
+) -> CaptureResult:
+    """리눅스: 가상 화면(Xvfb)에 브라우저를 띄우고 그 화면만 캡처한다."""
     with VirtualDisplay(job.video.width, job.video.height) as screen, PulseSink() as sink:
         assert screen.display
         env = {**os.environ, "DISPLAY": screen.display}
         with BrowserSession(site, display=screen.display, video=job.video, browser_cfg=job.browser) as browser:
             browser.enter()
 
-            while remaining > 2 and attempts <= retries:
-                attempts += 1
-                part_path = (
-                    out_path if attempts == 1
-                    else out_path.with_name(f"{out_path.stem}.part{attempts}{out_path.suffix}")
-                )
-                cmd = build_screen_command(screen.display, sink.monitor, part_path, int(remaining), job.video)
-                returncode, elapsed, stderr_tail = run_ffmpeg(
-                    cmd, part_path, int(remaining), stall_timeout=job.stall_timeout, log_file=log_file, env=env
-                )
-                total_elapsed += elapsed
-                captured = recorded_seconds(part_path)
-                if captured > 0:
-                    parts.append(part_path)
+            def make_cmd(part_path: Path, remaining: int) -> list[str]:
+                return build_screen_command(screen.display, sink.monitor, part_path, remaining, job.video)
 
-                if captured >= remaining * _MIN_COMPLETE_RATIO:
-                    remaining = 0
-                    break
+            parts, attempts, elapsed, stderr_tail, code = _record_loop(
+                job, out_path, duration, log_file, retries, make_cmd, env=env
+            )
 
-                remaining -= captured
-                if remaining > 2 and attempts <= retries:
-                    log.warning("화면 캡처가 끊겼습니다(%.0f초 남음). 재시도합니다.", remaining)
-                    time.sleep(job.retry_delay)
+    return _finish(parts, out_path, "browser", duration, attempts, elapsed, stderr_tail, code)
 
-    if not parts:
-        raise CaptureError(
-            f"화면 녹화 파일이 만들어지지 않았습니다. ffmpeg 종료코드 {returncode}\n{stderr_tail[-800:]}"
+
+def _capture_browser_windows(
+    job, site: SitePlan, out_path: Path, duration: int, log_file: Path | None, retries: int
+) -> CaptureResult:
+    """Windows: 실제 화면에 브라우저를 전체화면으로 띄우고 화면을 캡처한다."""
+    audio_device = None
+    if job.video.audio:
+        audio_device = find_loopback_device(getattr(job.browser, "audio_device", None))
+        if not audio_device:
+            log.warning("소리 없이 화면만 녹화합니다. (스테레오 믹스 또는 가상 오디오 케이블 필요)")
+
+    with BrowserSession(site, display=None, video=job.video, browser_cfg=job.browser) as browser:
+        browser.enter()
+
+        def make_cmd(part_path: Path, remaining: int) -> list[str]:
+            return build_gdigrab_command(
+                part_path, remaining, job.video,
+                audio_device=audio_device,
+                window_title=getattr(job.browser, "window_title", None),
+            )
+
+        parts, attempts, elapsed, stderr_tail, code = _record_loop(
+            job, out_path, duration, log_file, retries, make_cmd
         )
 
-    final = concat_parts(parts, out_path)
-    return CaptureResult(
-        path=final,
-        backend="browser",
-        requested_duration=duration,
-        elapsed=total_elapsed,
-        attempts=attempts,
-        parts=parts if len(parts) > 1 else [],
-        stderr_tail=stderr_tail,
-        returncode=returncode,
-    )
+    return _finish(parts, out_path, "browser", duration, attempts, elapsed, stderr_tail, code)

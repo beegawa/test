@@ -196,6 +196,8 @@ class BrowserConfig:
     page_load_wait: int = 20          # 페이지 로딩 후 대기(초)
     executable_path: str | None = None
     mute_page: bool = False
+    audio_device: str | None = None   # Windows: 소리를 받을 dshow 장치 이름
+    window_title: str | None = None   # Windows: 이 제목의 창만 캡처 (기본: 전체 화면)
     extra_args: list[str] = field(default_factory=list)
 
 

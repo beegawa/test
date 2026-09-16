@@ -250,6 +250,21 @@ def cmd_doctor(args) -> int:
         if not path and name in required:
             missing_required.append(name)
 
+    if sys.platform.startswith("win"):
+        print("\n[Windows 소리 녹음]")
+        from .wincapture import find_loopback_device, list_audio_devices
+
+        device = find_loopback_device()
+        if device:
+            print(f"  O 소리 장치    {device}")
+        else:
+            print("  X 소리 장치    시스템 소리를 녹음할 장치가 없습니다.")
+            print("     -> 소리 설정 > 녹음 탭에서 '스테레오 믹스' 를 사용으로 바꾸거나,")
+            print("        VB-Audio Virtual Cable (무료) 을 설치하세요. 없으면 영상만 녹화됩니다.")
+            devices = list_audio_devices()
+            if devices:
+                print(f"     현재 잡히는 장치: {', '.join(devices[:5])}")
+
     print("\n[파이썬 패키지]")
     for module, note in (("yaml", "설정 파일 파싱(필수)"), ("playwright", "Zoom 등 브라우저 자동 조작(선택)")):
         try:
