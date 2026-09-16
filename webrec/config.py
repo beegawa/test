@@ -197,7 +197,9 @@ class BrowserConfig:
     executable_path: str | None = None
     mute_page: bool = False
     audio_device: str | None = None   # Windows: 소리를 받을 dshow 장치 이름
-    window_title: str | None = None   # Windows: 이 제목의 창만 캡처 (기본: 전체 화면)
+    window_title: str | None = None   # Windows: 이 제목의 창만 캡처
+    capture: str = "auto"             # auto | video | screen | region - 아래 설명 참고
+    region: str | None = None         # capture=region 일 때 "x,y,너비,높이"
     extra_args: list[str] = field(default_factory=list)
 
 
@@ -338,6 +340,21 @@ def _build_notify(data: dict[str, Any]) -> NotifyConfig:
     return cfg
 
 
+CAPTURE_MODES = ("auto", "video", "screen", "region")
+
+
+def _build_browser(data: dict[str, Any], job_name: str) -> BrowserConfig:
+    cfg = _build_dataclass(BrowserConfig, data, f"'{job_name}'.browser")
+    mode = (cfg.capture or "auto").lower()
+    if mode not in CAPTURE_MODES:
+        raise ConfigError(
+            f"'{job_name}'.browser.capture: {list(CAPTURE_MODES)} 중 하나여야 합니다 (받은 값: {cfg.capture})"
+        )
+    if mode == "region" and not cfg.region:
+        raise ConfigError(f"'{job_name}'.browser.capture=region 이면 region 에 'x,y,너비,높이' 가 필요합니다.")
+    return replace(cfg, capture=mode)
+
+
 def _build_video(data: dict[str, Any]) -> VideoConfig:
     cfg = _build_dataclass(VideoConfig, data, "video")
     if not re.fullmatch(r"\d+x\d+", cfg.resolution.lower()):
@@ -406,9 +423,7 @@ def _build_job(
         remux_mp4=bool(merged.get("remux_mp4", False)),
         preflight=_build_preflight(_as_dict(merged.get("preflight"), f"'{name}'.preflight")),
         video=_build_video(_as_dict(merged.get("video"), f"'{name}'.video")),
-        browser=_build_dataclass(
-            BrowserConfig, _as_dict(merged.get("browser"), f"'{name}'.browser"), f"'{name}'.browser"
-        ),
+        browser=_build_browser(_as_dict(merged.get("browser"), f"'{name}'.browser"), name),
         notify=_build_notify(_as_dict(merged.get("notify"), f"'{name}'.notify")),
     )
 

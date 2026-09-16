@@ -338,6 +338,7 @@ class WebrecApp:
             "start": spec.get("start"),
             "cron": spec.get("cron"),
             "backend": spec.get("backend", "auto"),
+            "capture": (spec.get("browser") or {}).get("capture", "auto"),
             "started_at": record.started_at,
             "duration_sec": record.duration_sec,
             "runs": record.runs[:5],
@@ -416,9 +417,12 @@ class WebrecApp:
 
         browser = {
             key: payload.get(key)
-            for key in ("display_name", "email", "passcode")
+            for key in ("display_name", "email", "passcode", "region")
             if (payload.get(key) or "").strip()
         }
+        capture_mode = (payload.get("capture") or "auto").strip().lower()
+        if capture_mode != "auto":
+            browser["capture"] = capture_mode
         if browser:
             spec["browser"] = browser
 

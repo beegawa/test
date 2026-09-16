@@ -119,6 +119,20 @@ def run_preflight(job, *, workdir: Path | None = None, log_file: Path | None = N
             max_retries=1,  # 점검 단계에서는 재시도를 최소화한다
         )
         report.sample_path = result.path
+
+        # 캡처 중에 발견한 문제(정지 화면, 소리 장치 없음 등)를 검사 항목으로 올린다
+        for warning in result.warnings:
+            if isinstance(warning, dict):
+                report.checks.append(
+                    Check(warning.get("name", "확인 필요"), False, warning.get("detail", ""), fatal=True)
+                )
+            else:
+                report.checks.append(Check("확인 필요", False, str(warning), fatal=True))
+        report.notes.extend(result.notes)
+        if result.region:
+            x, y, width, height = result.region
+            report.notes.append(f"영상 영역만 녹화합니다: {width}x{height} (화면 위치 {x},{y})")
+
         report.verification = verify_recording(
             result.path,
             expected_duration=cfg.duration,

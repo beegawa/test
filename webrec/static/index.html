@@ -142,6 +142,20 @@ a{color:var(--accent)}
         <div><label for="notify_to">결과 알림 메일</label><input id="notify_to" placeholder="자동"></div>
       </div>
       <div class="row">
+        <div>
+          <label for="capture">녹화 영역 (브라우저 캡처일 때)</label>
+          <select id="capture">
+            <option value="auto">영상 부분만 (권장)</option>
+            <option value="screen">화면 전체</option>
+            <option value="region">직접 지정</option>
+          </select>
+        </div>
+        <div id="wrap-region" style="display:none">
+          <label for="region">영역 좌표 (x, y, 너비, 높이)</label>
+          <input id="region" placeholder="100,200,1280,720">
+        </div>
+      </div>
+      <div class="row">
         <div><label for="display_name">Zoom 표시 이름</label><input id="display_name" placeholder="Recorder"></div>
         <div><label for="email">Zoom 이메일 (웨비나)</label><input id="email" placeholder="선택"></div>
         <div><label for="passcode">Zoom 암호</label><input id="passcode" placeholder="선택"></div>
@@ -315,6 +329,8 @@ function buildPayload() {
     display_name: $("display_name").value.trim(),
     email: $("email").value.trim(),
     passcode: $("passcode").value.trim(),
+    capture: $("capture").value,
+    region: $("region").value.trim(),
     resolution: $("resolution").value,
     fps: +$("fps").value,
     audio: $("audio").checked,
@@ -371,6 +387,7 @@ function renderJobs(jobs) {
       <h3>${esc(job.name)} <span class="badge ${badgeClass(job.status)}">${job.status}</span></h3>
       <div class="meta">${esc(job.url)}</div>
       <div class="meta">${when} · 길이 ${job.duration_label || "-"} ·
+        ${job.backend === "browser" ? (job.capture === "screen" ? "화면 전체 · " : "영상 부분만 · ") : ""}
         ${job.preflight && job.preflight.enabled
           ? `${job.preflight.duration}초 사전 점검 (${Math.round(job.preflight.lead_seconds / 60)}분 전)`
           : "사전 점검 없음"}</div>
@@ -487,6 +504,9 @@ $("test-mail").onclick = async () => {
   catch (err) { toast(err.message, true); }
 };
 
+$("capture").onchange = () => {
+  $("wrap-region").style.display = $("capture").value === "region" ? "" : "none";
+};
 $("repeat").onchange = syncForm;
 $("duration").oninput = updatePreview;
 $("start").oninput = updatePreview;

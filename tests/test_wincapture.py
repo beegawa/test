@@ -140,7 +140,10 @@ def test_windows_uses_gdigrab_and_no_virtual_display(tmp_path, monkeypatch):
          mock.patch.object(cap, "_record_loop", fake_loop), \
          mock.patch.object(cap, "concat_parts", lambda parts, out: out), \
          mock.patch.object(cap, "VirtualDisplay", side_effect=AssertionError("Xvfb 를 쓰면 안 된다")):
-        session.return_value.__enter__.return_value = mock.MagicMock()
+        browser = mock.MagicMock()
+        browser.capture_region.return_value = None      # 전체 화면
+        browser.notes, browser.warnings = [], []
+        session.return_value.__enter__.return_value = browser
         result = cap.capture(job, tmp_path / "out.mkv", 3600, backend="browser")
 
     cmd = captured["cmd"]
@@ -175,7 +178,10 @@ def test_linux_still_uses_virtual_display(tmp_path, monkeypatch):
          mock.patch.object(cap, "_record_loop", fake_loop), \
          mock.patch.object(cap, "concat_parts", lambda parts, out: out):
         display.return_value.__enter__.return_value.display = ":99"
-        session.return_value.__enter__.return_value = mock.MagicMock()
+        browser = mock.MagicMock()
+        browser.capture_region.return_value = None
+        browser.notes, browser.warnings = [], []
+        session.return_value.__enter__.return_value = browser
         cap.capture(job, tmp_path / "out.mkv", 3600, backend="browser")
 
     assert "x11grab" in captured["cmd"]

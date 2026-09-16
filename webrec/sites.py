@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from urllib.parse import quote, urlparse, urlsplit, urlunparse
 
 from .errors import CaptureError
+from .screengrab import find_color_box, grab_frame
 from .tools import browser_path
 
 log = logging.getLogger(__name__)
@@ -127,6 +128,116 @@ def zoom_web_client_url(url: str) -> str:
     return urlunparse(parsed._replace(path=path))
 
 
+
+
+# 화면에서 브라우저 내용 영역이 어디인지 '측정' 하기 위한 표식
+_CALIBRATION_COLOR = (255, 0, 255)   # 자홍색 - 일반 페이지에 거의 없는 색
+_MARKER_JS = """
+(show) => {
+  const id = '__webrec_calibration__';
+  const old = document.getElementById(id);
+  if (!show) { if (old) old.remove(); return null; }
+  const div = old || document.createElement('div');
+  div.id = id;
+  div.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:100vh;' +
+                      'background:#ff00ff;z-index:2147483647;pointer-events:none;margin:0';
+  if (!old) document.body.appendChild(div);
+  return { innerWidth: window.innerWidth, innerHeight: window.innerHeight };
+}
+"""
+
+# 페이지에서 가장 큰 영상 요소를 찾는다. Zoom 웹클라이언트는 <canvas> 를 쓴다.
+_VIDEO_PROBE_JS = """
+() => {
+  const nodes = Array.from(document.querySelectorAll('video, canvas'));
+  let best = null, bestArea = 0;
+  for (const el of nodes) {
+    const r = el.getBoundingClientRect();
+    const area = r.width * r.height;
+    const visible = r.width > 120 && r.height > 90 &&
+                    getComputedStyle(el).visibility !== 'hidden' &&
+                    getComputedStyle(el).display !== 'none';
+    if (visible && area > bestArea) { best = el; bestArea = area; }
+  }
+  if (!best) return null;
+  const r = best.getBoundingClientRect();
+  return { tag: best.tagName, x: r.x, y: r.y, width: r.width, height: r.height, area: bestArea };
+}
+"""
+
+# 브라우저 창이 화면 어디에 있는지 (내용 영역의 시작점을 구하는 데 쓴다)
+_WINDOW_PROBE_JS = """
+() => ({
+  screenX: window.screenX, screenY: window.screenY,
+  outerWidth: window.outerWidth, outerHeight: window.outerHeight,
+  innerWidth: window.innerWidth, innerHeight: window.innerHeight,
+  dpr: window.devicePixelRatio || 1,
+  screenWidth: window.screen.width, screenHeight: window.screen.height,
+})
+"""
+
+# 영상 요소를 전체화면으로 만든다(클릭 직후여야 브라우저가 허용한다)
+_FULLSCREEN_JS = """
+() => {
+  const nodes = Array.from(document.querySelectorAll('video, canvas'));
+  let best = null, bestArea = 0;
+  for (const el of nodes) {
+    const r = el.getBoundingClientRect();
+    if (r.width * r.height > bestArea) { best = el; bestArea = r.width * r.height; }
+  }
+  if (!best) return false;
+  const target = best.tagName === 'CANVAS' ? (best.parentElement || best) : best;
+  const request = target.requestFullscreen || target.webkitRequestFullscreen;
+  if (!request) return false;
+  try { request.call(target); return true; } catch (e) { return false; }
+}
+"""
+
+
+
+# 영상을 실제로 재생시킨다 (자동재생이 막혀 정지 상태로 녹화되는 것을 막는다)
+_PLAY_JS = """
+() => {
+  const videos = Array.from(document.querySelectorAll('video'));
+  if (!videos.length) return { found: false };
+  const v = videos.reduce((a, b) => {
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    return (rb.width * rb.height > ra.width * ra.height) ? b : a;
+  });
+  v.muted = false;
+  v.volume = 1;
+  const p = v.play();
+  if (p && p.catch) p.catch(() => { v.muted = true; v.play().catch(() => {}); });
+  return { found: true, paused: v.paused, muted: v.muted, currentTime: v.currentTime };
+}
+"""
+
+# 재생이 '진행되고 있는지' 확인 (정지 화면인지 아닌지)
+_PLAYBACK_STATE_JS = """
+() => {
+  const videos = Array.from(document.querySelectorAll('video'));
+  if (!videos.length) return { found: false };
+  const v = videos.reduce((a, b) => {
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    return (rb.width * rb.height > ra.width * ra.height) ? b : a;
+  });
+  return {
+    found: true, paused: v.paused, muted: v.muted, volume: v.volume,
+    currentTime: v.currentTime, readyState: v.readyState, ended: v.ended,
+  };
+}
+"""
+
+# 창 테두리 계산에는 1~2픽셀 오차가 있다. 안쪽으로 조금 당겨 페이지 배경이
+# 가장자리에 묻어나오지 않게 한다(영상은 거의 손실되지 않는다).
+_EDGE_INSET = 3
+
+
+def _even(value: float) -> int:
+    """h264 는 가로/세로가 짝수여야 한다."""
+    return max(2, int(round(value)) // 2 * 2)
+
+
 class BrowserSession:
     """가상 화면 위에 브라우저를 띄우고 사이트에 입장시킨다.
 
@@ -144,6 +255,8 @@ class BrowserSession:
         self._page = None
         self._proc: subprocess.Popen | None = None
         self.automated = False
+        self.notes: list[str] = []      # 참고 사항 (메일/점검 결과에 표시)
+        self.warnings: list[str] = []   # 문제 가능성이 있는 사항
 
     # ---------------------------------------------------------------- 실행
     def start(self) -> None:
@@ -325,30 +438,309 @@ class BrowserSession:
         page = self._page
         assert page is not None
 
-        # 쿠키/동의 배너 닫기
-        for selector in ("button:has-text('Accept all')", "button:has-text('모두 수락')", "button[aria-label='Accept all']"):
+        self._dismiss_banners()
+        self.ensure_playing()
+
+    def _dismiss_banners(self) -> None:
+        """쿠키/동의 배너를 닫는다. 이게 떠 있으면 재생 버튼을 누를 수 없다."""
+        page = self._page
+        assert page is not None
+        selectors = (
+            "button:has-text('Accept all')", "button:has-text('모두 수락')",
+            "button:has-text('동의')", "button[aria-label='Accept all']",
+            "button[aria-label='모두 수락']", "tp-yt-paper-button:has-text('모두 수락')",
+        )
+        for selector in selectors:
             try:
                 button = page.locator(selector).first
-                if button.is_visible(timeout=2_000):
-                    button.click()
+                if button.is_visible(timeout=1_500):
+                    button.click(timeout=3_000)
                     page.wait_for_timeout(1_000)
-                    break
+                    return
             except Exception:
                 continue
 
-        # 재생 시작 + 전체화면 (YouTube 등)
+    def ensure_playing(self, *, attempts: int = 4) -> dict:
+        """영상이 실제로 재생되도록 만들고, 재생 중인지 확인한다.
+
+        자동재생이 막혀 '정지 화면' 이 그대로 녹화되는 사고를 막는다.
+        큰 재생 버튼 클릭 -> JS play() -> 키보드 단축키 순으로 시도하고,
+        재생 위치(currentTime)가 실제로 흐르는지까지 확인한다.
+        """
+        page = self._page
+        if page is None:
+            return {"found": False}
+
+        for attempt in range(attempts):
+            state = self.playback_state()
+            if not state.get("found"):
+                return state                      # <video> 가 없는 사이트(Zoom 등)
+            if state.get("advancing"):
+                if state.get("muted"):
+                    self.notes.append("영상이 음소거 상태로 재생 중입니다(소리가 녹음되지 않을 수 있습니다).")
+                log.info("영상 재생 확인 (위치 %.1fs)", state.get("currentTime", 0))
+                return state
+
+            log.info("영상이 멈춰 있어 재생을 시도합니다. (%d/%d)", attempt + 1, attempts)
+            self._click_play_button()
+            try:
+                page.evaluate(_PLAY_JS)
+            except Exception as exc:
+                log.debug("play() 호출 실패: %s", exc)
+            if attempt >= 1:
+                for key in ("k", "Space"):
+                    try:
+                        page.keyboard.press(key)
+                        page.wait_for_timeout(400)
+                    except Exception:
+                        pass
+            page.wait_for_timeout(1_200)
+
+        final = self.playback_state()
+        if final.get("found") and not final.get("advancing"):
+            message = "영상이 재생되지 않고 정지 상태입니다(재생 버튼을 누르지 못했습니다)."
+            log.warning(message)
+            self.warnings.append({"name": "재생 상태", "detail": message})
+        return final
+
+    def _click_play_button(self) -> None:
+        """사이트별 큰 재생 버튼을 눌러 본다."""
+        page = self._page
+        assert page is not None
+        selectors = (
+            ".ytp-large-play-button",           # YouTube 가운데 큰 버튼
+            "button.ytp-play-button",           # YouTube 하단 재생 버튼
+            "button[aria-label*='재생']",
+            "button[aria-label*='Play']",
+            "button[title*='Play']",
+            ".vjs-big-play-button",             # video.js
+            ".plyr__control--overlaid",         # Plyr
+            "video",                            # 마지막 수단: 영상 자체 클릭
+        )
+        for selector in selectors:
+            try:
+                element = page.locator(selector).first
+                if element.count() and element.is_visible(timeout=1_200):
+                    element.click(timeout=3_000, force=True)
+                    page.wait_for_timeout(600)
+                    return
+            except Exception:
+                continue
+
+    def playback_state(self) -> dict:
+        """재생 상태를 확인한다. 재생 위치가 흐르는지(advancing)까지 본다."""
+        page = self._page
+        if page is None:
+            return {"found": False}
         try:
-            page.keyboard.press("k")
-        except Exception:
-            pass
+            first = page.evaluate(_PLAYBACK_STATE_JS)
+            if not first or not first.get("found"):
+                return {"found": False}
+            page.wait_for_timeout(1_200)
+            second = page.evaluate(_PLAYBACK_STATE_JS)
+            advancing = bool(
+                second and second.get("found")
+                and not second.get("paused")
+                and second.get("currentTime", 0) > first.get("currentTime", 0)
+            )
+            state = dict(second or first)
+            state["advancing"] = advancing
+            return state
+        except Exception as exc:
+            log.debug("재생 상태 확인 실패: %s", exc)
+            return {"found": False}
+
+    # -------------------------------------------------------------- 녹화 영역
+    def capture_region(self) -> tuple[int, int, int, int] | None:
+        """녹화할 화면 영역을 정한다. 실패하면 None(전체 화면)."""
         try:
-            player = page.locator("video").first
-            if player.is_visible(timeout=5_000):
-                player.click()
-                page.wait_for_timeout(500)
-                page.keyboard.press("f")
+            region = self._capture_region()
+        except Exception as exc:  # 영역 계산 실패로 녹화를 못 하면 안 된다
+            log.warning("녹화 영역을 정하지 못해 화면 전체를 녹화합니다: %s", exc)
+            return None
+        if region is None:
+            return None
+        if not isinstance(region, (tuple, list)) or len(region) != 4:
+            log.warning("녹화 영역 값이 올바르지 않아 화면 전체를 녹화합니다: %r", region)
+            return None
+        return tuple(int(value) for value in region)  # type: ignore[return-value]
+
+    def _capture_region(self) -> tuple[int, int, int, int] | None:
+        """녹화할 화면 영역을 정한다.
+
+        반환값이 None 이면 화면 전체를 녹화한다.
+        설정(capture)에 따라:
+          screen - 항상 전체 화면
+          region - 사용자가 지정한 좌표
+          video  - 영상 요소 위치를 계산해 그 부분만
+          auto   - 영상을 전체화면으로 만들어 보고(화질이 가장 좋다),
+                   안 되면 영상 요소 위치만큼 잘라낸다
+        """
+        mode = (getattr(self.cfg, "capture", "auto") or "auto").lower()
+
+        if mode == "screen":
+            return None
+        if mode == "region":
+            return _parse_region(getattr(self.cfg, "region", None))
+        if not self.automated or self._page is None:
+            if mode == "video":
+                log.warning(
+                    "영상 영역만 녹화하려면 playwright 가 필요합니다. 전체 화면을 녹화합니다."
+                )
+            return None
+
+        if mode == "auto" and self._make_video_fullscreen():
+            log.info("영상을 전체화면으로 만들었습니다. 화면 전체를 녹화합니다(=영상만).")
+            return None
+
+        rect = self._video_screen_rect()
+        if rect is None:
+            log.warning("페이지에서 영상 영역을 찾지 못해 화면 전체를 녹화합니다.")
+        else:
+            log.info("영상 영역만 녹화합니다: %dx%d (위치 %d,%d)", rect[2], rect[3], rect[0], rect[1])
+        return rect
+
+    def _make_video_fullscreen(self) -> bool:
+        """영상 요소를 전체화면으로. 성공하면 True."""
+        page = self._page
+        assert page is not None
+        try:
+            # 전체화면 요청은 '사용자 조작 직후' 에만 허용되므로 먼저 클릭한다
+            element = page.locator("video, canvas").first
+            if element.count() == 0:
+                return False
+            try:
+                element.click(timeout=3_000, force=True)
+            except Exception:
+                pass
+            if not page.evaluate(_FULLSCREEN_JS):
+                return False
+            page.wait_for_timeout(1_500)
+
+            # 정말 화면을 채웠는지 확인한다
+            info = page.evaluate(_WINDOW_PROBE_JS)
+            video = page.evaluate(_VIDEO_PROBE_JS)
+            if not video or not info:
+                return False
+            covered = (video["width"] * video["height"]) / max(
+                1, info["screenWidth"] * info["screenHeight"]
+            )
+            return covered >= 0.8
+        except Exception as exc:
+            log.debug("전체화면 전환 실패: %s", exc)
+            return False
+
+    def _measure_viewport(self) -> tuple[float, float, float] | None:
+        """브라우저 내용 영역이 화면 어디에서 시작하는지 직접 측정한다.
+
+        페이지 전체를 덮는 자홍색 표식을 잠깐 띄우고 화면을 한 장 찍어
+        그 표식이 실제로 찍힌 위치를 읽는다. 창 관리자 유무·화면 배율·
+        전체화면 여부와 상관없이 정확하다.
+
+        반환: (화면상 x, 화면상 y, 배율). 배율은 CSS 픽셀 -> 화면 픽셀 비율.
+        """
+        page = self._page
+        assert page is not None
+        info = None
+        box = None
+        try:
+            info = page.evaluate(_MARKER_JS, True)
+            if info:
+                page.wait_for_timeout(250)
+                screen_info = page.evaluate(_WINDOW_PROBE_JS)
+                dpr = screen_info.get("dpr") or 1
+                width = int(screen_info["screenWidth"] * dpr)
+                height = int(screen_info["screenHeight"] * dpr)
+                frame = grab_frame(display=self.display, width=width, height=height)
+                if frame:
+                    box = find_color_box(frame, width, height, _CALIBRATION_COLOR)
+        except Exception as exc:
+            log.debug("내용 영역 측정 실패: %s", exc)
+        finally:
+            try:
+                page.evaluate(_MARKER_JS, False)
+            except Exception:
+                pass
+
+        if not box or not info:
+            return None
+
+        x, y, measured_width, _ = box
+        scale = measured_width / max(1, info["innerWidth"])
+        if not (0.3 <= scale <= 4.0):      # 측정값이 이상하면 쓰지 않는다
+            log.debug("측정된 배율이 이상합니다: %.2f", scale)
+            return None
+        log.debug("내용 영역 측정: 시작(%d,%d) 배율 %.2f", x, y, scale)
+        return float(x), float(y), float(scale)
+
+    def _video_screen_rect(self) -> tuple[int, int, int, int] | None:
+        """영상 요소가 화면 좌표로 어디에 있는지 구한다."""
+        page = self._page
+        assert page is not None
+        try:
+            info = page.evaluate(_WINDOW_PROBE_JS)
         except Exception:
-            pass
+            return None
+
+        best = None
+        for frame in page.frames:
+            try:
+                found = frame.evaluate(_VIDEO_PROBE_JS)
+            except Exception:
+                continue
+            if not found:
+                continue
+            if frame != page.main_frame:  # iframe 안이면 iframe 위치를 더해준다
+                try:
+                    box = frame.frame_element().bounding_box()
+                except Exception:
+                    box = None
+                if not box:
+                    continue
+                found["x"] += box["x"]
+                found["y"] += box["y"]
+            if best is None or found["area"] > best["area"]:
+                best = found
+
+        if not best:
+            return None
+
+        measured = self._measure_viewport()
+        if measured:
+            origin_x, origin_y, scale = measured          # 실제로 측정한 값
+        else:
+            # 측정에 실패하면 창 정보로 계산한다(환경에 따라 몇 픽셀 어긋날 수 있다)
+            log.debug("내용 영역을 측정하지 못해 창 정보로 계산합니다.")
+            border = max(0, (info["outerWidth"] - info["innerWidth"]) / 2)
+            top_bar = max(0, info["outerHeight"] - info["innerHeight"] - border)
+            scale = info.get("dpr") or 1
+            origin_x = (info["screenX"] + border) * scale
+            origin_y = (info["screenY"] + top_bar) * scale
+
+        x = origin_x + best["x"] * scale
+        y = origin_y + best["y"] * scale
+        width = best["width"] * scale
+        height = best["height"] * scale
+        dpr = scale
+
+        # 화면 밖으로 나가지 않게 자른다
+        screen_w = info["screenWidth"] * dpr
+        screen_h = info["screenHeight"] * dpr
+        x = max(0, min(x, screen_w - 2))
+        y = max(0, min(y, screen_h - 2))
+        width = min(width, screen_w - x)
+        height = min(height, screen_h - y)
+        if width < 100 or height < 100:
+            return None
+
+        # 가장자리에 페이지 배경이 1~2픽셀 묻어나오는 것을 막는다
+        inset = _EDGE_INSET if width > 4 * _EDGE_INSET and height > 4 * _EDGE_INSET else 0
+        return (
+            int(x) + inset,
+            int(y) + inset,
+            _even(width - 2 * inset),
+            _even(height - 2 * inset),
+        )
 
     # ------------------------------------------------------------------ 종료
     def close(self) -> None:
@@ -392,3 +784,19 @@ def _clean_env() -> dict:
     env = dict(os.environ)
     env.pop("DISPLAY", None)
     return env
+
+
+def _parse_region(text: str | None) -> tuple[int, int, int, int] | None:
+    """'x,y,너비,높이' 문자열을 좌표로 바꾼다."""
+    if not text:
+        return None
+    parts = [piece.strip() for piece in str(text).replace("x", ",").split(",") if piece.strip()]
+    if len(parts) != 4:
+        log.warning("녹화 영역 형식이 잘못되었습니다(x,y,너비,높이): %s", text)
+        return None
+    try:
+        x, y, width, height = (int(float(piece)) for piece in parts)
+    except ValueError:
+        log.warning("녹화 영역에 숫자가 아닌 값이 있습니다: %s", text)
+        return None
+    return max(0, x), max(0, y), _even(width), _even(height)

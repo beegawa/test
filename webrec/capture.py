@@ -43,6 +43,9 @@ class CaptureResult:
     parts: list[Path] = field(default_factory=list)
     stderr_tail: str = ""
     returncode: int = 0
+    notes: list[str] = field(default_factory=list)      # 참고 사항
+    warnings: list[str] = field(default_factory=list)   # 문제 가능성
+    region: tuple[int, int, int, int] | None = None     # 잘라낸 영역
 
     def to_dict(self) -> dict:
         return {
@@ -116,22 +119,35 @@ def build_stream_command(urls: list[str], out_path: Path, duration: int, video) 
 
 # -------------------------------------------------------------------- browser
 def build_screen_command(
-    display: str, audio_source: str | None, out_path: Path, duration: int, video
+    display: str,
+    audio_source: str | None,
+    out_path: Path,
+    duration: int,
+    video,
+    region: tuple[int, int, int, int] | None = None,
 ) -> list[str]:
-    """가상 화면(X11) + 가상 오디오(Pulse)를 캡처하는 ffmpeg 명령."""
+    """가상 화면(X11) + 가상 오디오(Pulse)를 캡처하는 ffmpeg 명령.
+
+    region 을 주면 그 영역만 잘라서 녹화한다(영상 부분만 담을 때).
+    """
+    x, y, width, height = region if region else (0, 0, video.width, video.height)
     cmd = [
         ffmpeg_path(), "-hide_banner", "-loglevel", "warning", "-y",
         "-f", "x11grab",
         "-draw_mouse", "0",
         "-framerate", str(video.fps),
-        "-video_size", f"{video.width}x{video.height}",
-        "-i", f"{display}.0+0,0",
+        "-video_size", f"{width}x{height}",
+        "-i", f"{display}.0+{x},{y}",
     ]
     if audio_source and video.audio:
         cmd += ["-f", "pulse", "-ac", "2", "-i", audio_source]
 
+    cmd += ["-t", str(duration)]
+    if region and (width, height) != (video.width, video.height):
+        # 잘라낸 크기가 설정 해상도와 다르면 비율을 지키며 맞춘다
+        cmd += ["-vf", f"scale={video.width}:{video.height}:force_original_aspect_ratio=decrease,"
+                       f"pad={video.width}:{video.height}:-1:-1:color=black"]
     cmd += [
-        "-t", str(duration),
         "-c:v", video.video_codec,
         "-preset", video.preset,
         "-crf", str(video.crf),
@@ -375,6 +391,8 @@ def _record_loop(
 def _finish(
     parts: list[Path], out_path: Path, backend: str, duration: int,
     attempts: int, elapsed: float, stderr_tail: str, returncode: int,
+    *, notes: list[str] | None = None, warnings: list[str] | None = None,
+    region: tuple[int, int, int, int] | None = None,
 ) -> CaptureResult:
     if not parts:
         raise CaptureError(
@@ -390,6 +408,9 @@ def _finish(
         parts=parts if len(parts) > 1 else [],
         stderr_tail=stderr_tail,
         returncode=returncode,
+        notes=list(notes or []),
+        warnings=list(warnings or []),
+        region=region,
     )
 
 
@@ -422,15 +443,30 @@ def _capture_browser_x11(
         env = {**os.environ, "DISPLAY": screen.display}
         with BrowserSession(site, display=screen.display, video=job.video, browser_cfg=job.browser) as browser:
             browser.enter()
+            region = browser.capture_region()
 
             def make_cmd(part_path: Path, remaining: int) -> list[str]:
-                return build_screen_command(screen.display, sink.monitor, part_path, remaining, job.video)
+                return build_screen_command(
+                    screen.display, sink.monitor, part_path, remaining, job.video, region
+                )
 
             parts, attempts, elapsed, stderr_tail, code = _record_loop(
                 job, out_path, duration, log_file, retries, make_cmd, env=env
             )
+            notes, warnings = list(browser.notes), list(browser.warnings)
+            if job.video.audio and not sink.monitor:
+                warnings.append({
+                    "name": "소리 장치",
+                    "detail": (
+                        "소리를 녹음하도록 설정했지만 소리 장치(PulseAudio)를 쓸 수 없어 "
+                        "영상만 녹화됩니다. 설치: sudo apt-get install -y pulseaudio"
+                    ),
+                })
+            elif sink.monitor:
+                notes.append(f"소리 녹음 장치: {sink.monitor}")
 
-    return _finish(parts, out_path, "browser", duration, attempts, elapsed, stderr_tail, code)
+    return _finish(parts, out_path, "browser", duration, attempts, elapsed, stderr_tail, code,
+                   notes=notes, warnings=warnings, region=region)
 
 
 def _capture_browser_windows(
@@ -438,23 +474,42 @@ def _capture_browser_windows(
 ) -> CaptureResult:
     """Windows: 실제 화면에 브라우저를 전체화면으로 띄우고 화면을 캡처한다."""
     audio_device = None
+    audio_problem: dict | None = None
     if job.video.audio:
         audio_device = find_loopback_device(getattr(job.browser, "audio_device", None))
         if not audio_device:
-            log.warning("소리 없이 화면만 녹화합니다. (스테레오 믹스 또는 가상 오디오 케이블 필요)")
+            audio_problem = {
+                "name": "소리 장치",
+                "detail": (
+                    "소리를 녹음하도록 설정했지만 이 PC 에서 시스템 소리를 받을 장치를 찾지 못했습니다. "
+                    "영상만 녹화됩니다. 소리 설정 > 녹음 탭에서 '스테레오 믹스'를 켜거나 "
+                    "VB-Audio Virtual Cable 을 설치하세요."
+                ),
+            }
+            log.warning(audio_problem["detail"])
 
     with BrowserSession(site, display=None, video=job.video, browser_cfg=job.browser) as browser:
         browser.enter()
+        region = browser.capture_region()
 
         def make_cmd(part_path: Path, remaining: int) -> list[str]:
             return build_gdigrab_command(
                 part_path, remaining, job.video,
                 audio_device=audio_device,
                 window_title=getattr(job.browser, "window_title", None),
+                offset=(region[0], region[1]) if region else None,
+                region=(region[2], region[3]) if region else None,
             )
 
         parts, attempts, elapsed, stderr_tail, code = _record_loop(
             job, out_path, duration, log_file, retries, make_cmd
         )
+        notes, warnings = list(browser.notes), list(browser.warnings)
 
-    return _finish(parts, out_path, "browser", duration, attempts, elapsed, stderr_tail, code)
+    if audio_problem:
+        warnings.append(audio_problem)
+    elif audio_device:
+        notes.append(f"소리 녹음 장치: {audio_device}")
+
+    return _finish(parts, out_path, "browser", duration, attempts, elapsed, stderr_tail, code,
+                   notes=notes, warnings=warnings, region=region)
