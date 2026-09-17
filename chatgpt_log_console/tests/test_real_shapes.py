@@ -102,3 +102,72 @@ def test_동작과_대화id_를_따로_꺼내는_함수():
 
 def test_원본은_통째로_보관된다():
     assert 정규화(AUDIT)["raw"] is AUDIT
+
+
+# ── CONVERSATION_MESSAGE : 실제 구조 (본문만 예시 문장으로 대체) ──────────
+CONV = {
+    "event_id": "9c27bc29-a5c9-48e4-b217-0d9e3fcbbd74",
+    "type": "CONVERSATION_MESSAGE",
+    "principal": {"id": "f4fd05b9", "type": "CHATGPT_WORKSPACE"},
+    "actor": {"type": "ACCOUNT_USER", "user_id": "user-rmE1", "user_email": "eee@example.com"},
+    "timestamp": "2026-08-18T06:00:01.108000Z",
+    "previous_message_id": "4aaf0c62",
+    "message": {
+        "id": "22a35076", "created_at": "2026-08-18T06:00:01.108000Z",
+        "author": {"type": "user", "client_type": "windows_app"},
+        "content": {"type": "text", "value": "회계 처리 방법을 알려줘"},
+    },
+    "conversation": {"id": "6a83f4cc-78fc-8343", "title": "New chat",
+                     "created_at": "2026-08-18T05:59:41.924513Z",
+                     "is_pinned": False, "is_temporary_chat": False},
+}
+
+
+def 대화(**바꿀것):
+    raw = {**CONV, **바꿀것}
+    return normalize(raw, log_id="eclf_x", event_type_hint="CONVERSATION_MESSAGE")
+
+
+def test_대화_본문은_message_content_value_에서_꺼낸다():
+    결과 = 대화()
+    assert "회계 처리 방법을 알려줘" in 결과["content"]
+    # conversation 은 메타데이터다. 제목·생성시각·False 가 내용에 섞이면 안 된다.
+    assert "New chat" not in 결과["content"]
+    assert "False" not in 결과["content"]
+    assert "2026-08-18T05:59:41" not in 결과["content"]
+
+
+def test_말한_사람이_사용자인지_ChatGPT_인지_구분한다():
+    assert 대화()["action"] == "사용자"
+    답변 = 대화(message={**CONV["message"], "author": {"type": "assistant"}})
+    assert 답변["action"] == "ChatGPT"
+    assert 답변["summary"].startswith("ChatGPT: ")
+
+
+def test_대화_id_는_conversation_id_에_들어_있다():
+    # 최상위에 conversation_id 가 없고 conversation.id 에 있다
+    assert 대화()["conversation_id"] == "6a83f4cc-78fc-8343"
+
+
+def test_제목이_있으면_요약_앞에_붙이고_New_chat_은_생략한다():
+    assert 대화()["summary"] == "사용자: 회계 처리 방법을 알려줘"
+    이름있음 = 대화(conversation={"id": "c1", "title": "회계 문의"})
+    assert 이름있음["summary"].startswith("[회계 문의] ")
+
+
+def test_같은_대화의_질문과_답변이_대화id_로_묶인다():
+    질문 = 대화()
+    답변 = 대화(event_id="9c27bc30",
+               message={"id": "m2", "author": {"type": "assistant"},
+                        "content": {"type": "text", "value": "가능합니다."}})
+    assert 질문["conversation_id"] == 답변["conversation_id"]
+    assert 질문["id"] != 답변["id"]
+
+
+def test_앱로그의_검색어는_내용으로_살리고_페이지_파라미터는_버린다():
+    raw = {**APP, "input": {"query": "received>=2026-08-15 read:false",
+                            "from_index": 0, "size": 40, "_meta": {"timezone": "Asia/Seoul"}}}
+    요약 = normalize(raw, log_id="eclf_x", event_type_hint="APP_LOG")["summary"]
+    assert "received>=2026-08-15" in 요약      # 무엇을 찾았는지는 남기고
+    assert "from_index" not in 요약            # 페이지 파라미터는 버린다
+    assert "Asia/Seoul" not in 요약

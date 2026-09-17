@@ -13,7 +13,7 @@ from typing import Any
 
 # 파서를 고칠 때마다 올린다. 저장된 DB 의 값이 이 버전보다 낮으면
 # 원본(raw)을 다시 해석해 채운다. 다시 내려받을 필요가 없다.
-PARSER_VERSION = 2
+PARSER_VERSION = 3
 
 ID_KEYS = ("id", "log_id", "event_id", "message_id", "uuid")
 TYPE_KEYS = ("event_type", "type", "event", "event_name")
@@ -26,13 +26,15 @@ USER_KEYS = (
     "user_id", "account", "member",
 )
 CONTENT_KEYS = (
-    "messages", "conversation", "content", "text", "message", "body",
-    "prompt_text", "prompt", "completion", "output", "title",
+    # 'conversation' 은 내용이 아니라 대화 메타데이터(제목·생성시각)라 넣지 않는다.
+    "messages", "message", "content", "text", "body",
+    "prompt_text", "prompt", "completion", "output", "query",
 )
 # 실제 로그에서 '무슨 일이 있었는지' 를 나타내는 자리들
 ACTION_KEYS = ("action", "detail_type", "log_type", "event_type")
 # 이 값들은 내용이 아니라 요청 파라미터라서 요약에 넣으면 방해가 된다
-NOISE_KEYS = ("_meta", "top", "order_by", "limit", "offset", "cursor")
+NOISE_KEYS = ("_meta", "top", "order_by", "limit", "offset", "cursor",
+              "from_index", "size", "page")
 _MAX_DEPTH = 4
 
 
@@ -157,7 +159,39 @@ def extract_action(raw: dict) -> str:
 
 def extract_conversation_id(raw: dict) -> str:
     값 = _walk(raw, ("conversation_id", "conversationId"))
+    if not 값:
+        # CONVERSATION_MESSAGE 는 conversation.id 에 들어 있다
+        대화 = raw.get("conversation")
+        if isinstance(대화, dict):
+            값 = 대화.get("id")
     return str(값) if 값 else ""
+
+
+def conversation_title(raw: dict) -> str:
+    대화 = raw.get("conversation")
+    제목 = 대화.get("title") if isinstance(대화, dict) else None
+    return "" if 제목 in (None, "", "New chat") else str(제목)
+
+
+def message_parts(raw: dict) -> tuple[str, str]:
+    """CONVERSATION_MESSAGE 에서 (말한 사람, 내용) 을 꺼낸다.
+
+    실제 구조:
+      message.author.type  = "user" | "assistant"
+      message.content      = {"type": "text", "value": "..."}
+    """
+    메시지 = raw.get("message")
+    if not isinstance(메시지, dict):
+        return "", ""
+    글쓴이 = 메시지.get("author")
+    역할 = 글쓴이.get("type") if isinstance(글쓴이, dict) else 글쓴이
+    본문 = 메시지.get("content")
+    if isinstance(본문, dict):
+        글 = 본문.get("value") or 본문.get("text") or 본문.get("parts") or ""
+        글 = 글 if isinstance(글, str) else flatten_content(글)
+    else:
+        글 = flatten_content(본문) if 본문 is not None else ""
+    return (str(역할) if 역할 else ""), str(글).strip()
 
 
 def _고유이름(raw: dict) -> str:
@@ -205,16 +239,28 @@ def normalize(raw: dict, *, log_id: str, index: int = 0, event_type_hint: str | 
     own_id = _walk(raw, ID_KEYS)
     record_id = str(own_id) if own_id else f"{log_id}#{index}"
     event_type = event_type_hint or raw.get("type") or _walk(raw, TYPE_KEYS) or ""
-    content = flatten_content(_내용찾기(raw))
+
+    역할, 대화본문 = message_parts(raw)
+    if 대화본문:
+        # 대화 한 마디. 누가 말했는지와 본문을 그대로 쓴다.
+        말한이 = _role_name(역할) if 역할 else ""
+        content = f"{말한이}: {대화본문}" if 말한이 else 대화본문
+        제목 = conversation_title(raw)
+        요약 = summarize(content, limit=140)
+        action, summary = 말한이, (f"[{제목}] {요약}" if 제목 else 요약)
+    else:
+        content = flatten_content(_내용찾기(raw))
+        action, summary = extract_action(raw), describe(raw, content)
+
     return {
         "id": record_id,
         "event_type": str(event_type),
         "ts": normalize_ts(_walk(raw, TS_KEYS)),
         "user": normalize_user(_walk(raw, USER_KEYS)),
-        "action": extract_action(raw),
+        "action": action,
         "conversation_id": extract_conversation_id(raw),
         "content": content,
-        "summary": describe(raw, content),
+        "summary": summary,
         "source_log_id": log_id,
         "raw": raw,
     }

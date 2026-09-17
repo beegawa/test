@@ -67,6 +67,30 @@ python3 app.py --db D:/logs.db  # DB 위치 지정
 결과는 DB 에 기억해 두고, [event_type 다시 탐지] 버튼으로 언제든 다시 확인할 수 있습니다.
 하나도 통하지 않으면 **필터 없이 전체 이벤트**를 받습니다.
 
+### 대화 메시지(`CONVERSATION_MESSAGE`)의 실제 구조
+
+```json
+{ "event_id": "...", "type": "CONVERSATION_MESSAGE",
+  "actor":   { "user_id": "...", "user_email": "hong@example.com" },
+  "timestamp": "2026-08-18T06:00:01.108000Z",
+  "previous_message_id": "...",
+  "message": { "id": "...",
+               "author":  { "type": "user", "client_type": "windows_app" },
+               "content": { "type": "text", "value": "실제 질문 내용" } },
+  "conversation": { "id": "...", "title": "New chat", "is_pinned": false } }
+```
+
+주의할 점 — 처음에 이 세 가지를 틀렸습니다.
+
+| 항목 | 있는 곳 | 흔한 실수 |
+|---|---|---|
+| 대화 본문 | `message.content.value` | `conversation` 을 내용으로 오인 → 제목·생성시각·`False` 가 표시됨 |
+| 말한 사람 | `message.author.type` (`user`/`assistant`) | 없다고 보고 빈칸 처리 |
+| 대화 id | **`conversation.id`** | 최상위 `conversation_id` 만 찾음 (다른 로그는 최상위에 있다) |
+
+질문과 답변은 각각 별도 레코드로 오고, **`conversation.id` 가 같으면 같은 대화**입니다.
+화면의 `대화 ID` 칸에 넣으면 한 대화를 순서대로 볼 수 있습니다.
+
 ### 지금까지 확인된 것 (2026-09, 실제 워크스페이스)
 
 | 공식 분류 | event_type | 상태 |
