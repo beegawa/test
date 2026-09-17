@@ -131,6 +131,8 @@ def collect(
                     log.warning("로그 %s 다운로드 실패: %s", log_id, exc)
                     continue
                 result.fetched += 1
+                if result.fetched % 10 == 0:
+                    report()          # 목록만 길게 도는 구간에서도 살아 있음을 알린다
                 for index, raw in enumerate(raw_records):
                     buffer.append(normalize(raw, log_id=log_id, index=index, event_type_hint=event_type))
                     result.records += 1

@@ -17,6 +17,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -26,12 +27,39 @@ import keystore  # noqa: E402
 from collector import collect  # noqa: E402
 from compliance import ComplianceClient, ComplianceError  # noqa: E402
 from records import PARSER_VERSION, normalize  # noqa: E402
-from settings import DEFAULT_MAX_LOGS, RETENTION_DAYS, db_path  # noqa: E402
+from settings import DATA_DIR, DEFAULT_MAX_LOGS, RETENTION_DAYS, db_path  # noqa: E402
 from store import LogStore  # noqa: E402
 from xlsx_export import build_workbook_bytes  # noqa: E402
 
 log = logging.getLogger("export")
 대화이벤트 = "CONVERSATION_MESSAGE"
+
+
+class 진행표시:
+    """같은 줄을 덮어써 진행 상황을 보여준다. 오래 걸려도 멈춘 게 아님을 알 수 있다."""
+
+    def __init__(self, 간격: float = 1.0):
+        self.시작 = time.monotonic()
+        self.마지막 = 0.0
+        self.간격 = 간격
+
+    @staticmethod
+    def _시간(초: float) -> str:
+        분, 초 = divmod(int(초), 60)
+        시, 분 = divmod(분, 60)
+        return f"{시}시간 {분}분" if 시 else (f"{분}분 {초}초" if 분 else f"{초}초")
+
+    def __call__(self, 상태: dict) -> None:
+        지금 = time.monotonic()
+        if 지금 - self.마지막 < self.간격:
+            return
+        self.마지막 = 지금
+        줄 = (f"  목록 {상태['listed']:,}건 · 다운로드 {상태['fetched']:,}건 · "
+              f"저장 {상태['saved']:,}건 · {self._시간(지금 - self.시작)} 경과")
+        print(f"\r{줄:<78}", end="", flush=True)
+
+    def 끝(self) -> None:
+        print(f"\r{' ' * 78}\r", end="", flush=True)
 
 
 def 기본_저장위치() -> Path:
@@ -72,16 +100,30 @@ def main(argv=None) -> int:
     parser.add_argument("--q", help="이 키워드가 든 대화만")
     parser.add_argument("--all", action="store_true", help="대화 외의 로그도 함께 내보낸다")
     parser.add_argument("--skip-pull", action="store_true", help="새로 받지 않고 DB 내용만 내보낸다")
+    parser.add_argument("--max-logs", type=int, default=DEFAULT_MAX_LOGS,
+                        help=f"한 번에 내려받을 로그 수 상한 (기본 {DEFAULT_MAX_LOGS:,})")
     parser.add_argument("--out", help="저장할 폴더 (기본: 바탕화면)")
     parser.add_argument("--db", help="SQLite 파일 경로")
     parser.add_argument("--no-open", action="store_true", help="다 만든 뒤 열지 않는다")
     parser.add_argument("-q", "--quiet", action="store_true")
     args = parser.parse_args(argv)
 
-    logging.basicConfig(
-        level=logging.WARNING if args.quiet else logging.INFO,
-        format="  %(message)s",
-    )
+    # 진행률을 한 줄로 덮어쓰며 보여주므로, 로그가 화면에 섞이면 읽기 어렵다.
+    # 자세한 기록은 파일로 남기고 화면은 깨끗하게 둔다.
+    handlers: list[logging.Handler] = []
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(DATA_DIR / "export.log", encoding="utf-8"))
+    except OSError:  # pragma: no cover
+        pass
+    화면 = logging.StreamHandler(sys.stderr)
+    화면.setLevel(logging.ERROR)          # 오류만 화면에
+    handlers.append(화면)
+    logging.basicConfig(level=logging.INFO, handlers=handlers,
+                        format="%(asctime)s %(levelname)-7s %(name)s | %(message)s",
+                        datefmt="%Y-%m-%d %H:%M:%S")
+    if args.quiet:
+        logging.getLogger().setLevel(logging.WARNING)
 
     key = keystore.load_key()
     if not key:
@@ -96,21 +138,39 @@ def main(argv=None) -> int:
 
         if not args.skip_pull:
             print()
-            print(f"  최근 {args.days}일치를 받는 중입니다. 잠시 기다려 주세요…")
+            print(f"  최근 {args.days}일치를 받는 중입니다.")
+            print(f"  처음 받을 때는 몇 분에서 수십 분까지 걸릴 수 있습니다"
+                  f" (로그 최대 {args.max_logs:,}개).")
+            print("  중간에 닫아도 그때까지 받은 것은 저장돼 있고, 다시 실행하면 이어서 받습니다.")
+            print()
+            표시 = 진행표시()
             try:
                 결과 = collect(
                     ComplianceClient(key), store,
                     days=args.days,
                     event_types=None if args.all else [대화이벤트],
-                    max_logs=DEFAULT_MAX_LOGS,
+                    max_logs=args.max_logs,
+                    progress=표시,
                 )
             except ComplianceError as exc:
+                표시.끝()
                 print()
                 print(f"  받아오지 못했습니다: {exc}")
                 print()
                 return 1
-            print(f"  다운로드 {결과.fetched}건 · 새로 저장 {결과.saved}건"
-                  f" · 이미 있던 것 {max(결과.records - 결과.saved, 0)}건")
+            except KeyboardInterrupt:
+                표시.끝()
+                print()
+                print("  중단했습니다. 그때까지 받은 것은 저장돼 있습니다.")
+                print("  다시 실행하면 이어서 받습니다.")
+                print()
+                return 130
+            표시.끝()
+            print(f"  다운로드 {결과.fetched:,}건 · 새로 저장 {결과.saved:,}건"
+                  f" · 이미 있던 것 {max(결과.records - 결과.saved, 0):,}건")
+            if 결과.truncated:
+                print(f"  상한({args.max_logs:,}개)에 걸려 일부만 받았습니다."
+                      f" 다시 실행하면 이어서 받습니다.")
             if 결과.errors:
                 print(f"  (오류 {len(결과.errors)}건 - 자세한 내용은 로그를 보세요)")
 

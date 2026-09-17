@@ -123,3 +123,35 @@ def test_대화순_정렬은_대화id_없는_것도_떨어뜨리지_않는다():
     행들 = [{"conversation_id": "", "ts": "2026-09-16T00:00:00Z", "id": "x"},
            {"conversation_id": "c-1", "ts": "2026-09-16T00:00:00Z", "id": "y"}]
     assert len(내보내기.대화순_정렬(행들)) == 2
+
+
+def test_진행률은_같은_줄을_덮어쓰고_너무_자주_찍지_않는다(capsys):
+    표시 = 내보내기.진행표시(간격=999)         # 간격이 길면 첫 번째만 찍힌다
+    표시({"listed": 10, "fetched": 5, "saved": 3})
+    표시({"listed": 20, "fetched": 15, "saved": 9})
+    출력 = capsys.readouterr().out
+    assert 출력.startswith("\r")
+    assert "목록 10건" in 출력
+    assert "목록 20건" not in 출력             # 간격 안에 들어온 것은 건너뛴다
+
+    표시.끝()
+    assert "\r" in capsys.readouterr().out     # 줄을 지운다
+
+
+def test_진행률의_경과_시간_표시():
+    시간 = 내보내기.진행표시._시간
+    assert 시간(45) == "45초"
+    assert 시간(125) == "2분 5초"
+    assert 시간(3700) == "1시간 1분"
+
+
+def test_중간에_끊어도_받은_것은_남는다(환경, tmp_path, monkeypatch):
+    """Ctrl+C 로 멈춰도 그때까지 저장된 것은 지키고, 다시 실행하면 이어 받는다."""
+    keystore.save_key("sk-admin-1234567890")
+    db = str(tmp_path / "a.db")
+
+    def 중단(*_a, **_k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(내보내기, "collect", 중단)
+    assert 내보내기.main(["--out", str(tmp_path / "x"), "--no-open", "--db", db]) == 130
