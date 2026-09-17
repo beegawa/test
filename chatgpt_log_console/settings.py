@@ -28,13 +28,32 @@ ORG_ID = os.environ.get("CHATGPT_ORG_ID") or None
 # 대화 로그의 정확한 event_type 이름은 관리자 콘솔의 '관리자 API 문서'에서
 # 확인해야 한다. 확인 전까지는 아래 후보를 limit=1 로 찔러보고 200 인 것만 쓴다.
 # 정확한 이름을 알게 되면 이 목록 맨 앞에 추가할 것.
-EVENT_TYPE_CANDIDATES = [
+# 공식 안내에 나오는 로그 종류: Conversation / Codex / Codex Security / Audit /
+# App / Auth / App Auth. 확인된 실제 값은 AUTH_LOG 뿐이라 같은 규칙(<이름>_LOG)으로
+# 후보를 넓혀 둔다. diagnose.py 로 어떤 값이 통하는지 확인할 수 있다.
+_DEFAULT_EVENT_TYPES = [
     "CONVERSATION_LOG",
-    "MESSAGE_LOG",
-    "CHAT_LOG",
+    "CONVERSATIONS_LOG",
     "CONVERSATION",
+    "CHAT_LOG",
+    "MESSAGE_LOG",
     "MESSAGE",
+    "CHAT_COMPLETION_LOG",
+    "CODEX_LOG",
+    "CODEX_SECURITY_LOG",
+    "APP_LOG",
+    "APP_AUTH_LOG",
+    "AUDIT_LOG",
+    "FILE_LOG",
     "AUTH_LOG",
+]
+
+# 정확한 이름을 알아내면 코드를 고치지 않고도 쓸 수 있게 환경변수로 덮어쓸 수 있다.
+#   CHATGPT_EVENT_TYPES=CONVERSATION_LOG,AUTH_LOG
+EVENT_TYPE_CANDIDATES = [
+    name.strip()
+    for name in os.environ.get("CHATGPT_EVENT_TYPES", ",".join(_DEFAULT_EVENT_TYPES)).split(",")
+    if name.strip()
 ]
 
 # ------------------------------------------------------------------ 저장소

@@ -67,15 +67,32 @@ python3 app.py --db D:/logs.db  # DB 위치 지정
 결과는 DB 에 기억해 두고, [event_type 다시 탐지] 버튼으로 언제든 다시 확인할 수 있습니다.
 하나도 통하지 않으면 **필터 없이 전체 이벤트**를 받습니다.
 
-정확한 이름을 알게 되면 `settings.py` 의 `EVENT_TYPE_CANDIDATES` **맨 앞에 추가**하세요.
+**정확한 이름을 알아내는 가장 빠른 방법**은 서버에 직접 묻는 것입니다. `diagnose.py` 의 3단계가
+일부러 없는 값을 보내서 API 가 돌려주는 허용 목록을 그대로 보여줍니다.
 
-```python
-EVENT_TYPE_CANDIDATES = [
-    "정확한_이름",          # ← 여기에 추가
-    "CONVERSATION_LOG",
-    ...
-]
 ```
+── 3. 서버에 허용되는 event_type 을 직접 물어보기 ──
+  [422] {"detail":[{"msg":"Input should be 'CONVERSATION_LOG' or 'AUTH_LOG'", ...
+```
+
+알아낸 이름은 **코드를 고치지 않고** 환경변수로 바로 쓸 수 있습니다.
+
+```bash
+# Windows
+set CHATGPT_EVENT_TYPES=알아낸이름,AUTH_LOG
+py -3 app.py
+
+# macOS / Linux
+CHATGPT_EVENT_TYPES=알아낸이름,AUTH_LOG python3 app.py
+```
+
+특정 이름만 시험해 보려면:
+
+```bash
+python3 diagnose.py --event-type 시험할이름
+```
+
+확정되면 `settings.py` 의 `_DEFAULT_EVENT_TYPES` 맨 앞에 넣어 두세요.
 
 ## 3-1. 키 검증이 안 될 때 — 진단 도구
 

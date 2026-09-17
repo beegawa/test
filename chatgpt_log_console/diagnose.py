@@ -32,7 +32,8 @@ from settings import (  # noqa: E402
 from compliance import since_days  # noqa: E402
 
 
-def 찔러보기(session, url: str, key: str, params: dict) -> tuple[int | None, str]:
+def 찔러보기(session, url: str, key: str, params: dict, *, 원본=False):
+    """한 번 호출하고 (상태코드, 설명) 을 돌려준다. 원본=True 면 응답 본문 전체도 함께."""
     try:
         response = session.get(
             url,
@@ -41,7 +42,8 @@ def 찔러보기(session, url: str, key: str, params: dict) -> tuple[int | None,
             timeout=30,
         )
     except requests.RequestException as exc:
-        return None, f"연결 자체가 안 됨: {type(exc).__name__}: {exc}"
+        메시지 = f"연결 자체가 안 됨: {type(exc).__name__}: {exc}"
+        return (None, 메시지, "") if 원본 else (None, 메시지)
 
     설명 = ""
     try:
@@ -52,8 +54,11 @@ def 찔러보기(session, url: str, key: str, params: dict) -> tuple[int | None,
             if not 설명 and "data" in body:
                 설명 = f"정상 - data {len(body.get('data') or [])}건, has_more={body.get('has_more')}"
     except ValueError:
-        설명 = (response.text or "")[:200].replace("\n", " ")
-    return response.status_code, 설명 or (response.text or "")[:200].replace("\n", " ")
+        설명 = (response.text or "")[:400].replace("\n", " ")
+    설명 = 설명 or (response.text or "")[:400].replace("\n", " ")
+    if 원본:
+        return response.status_code, 설명, (response.text or "")
+    return response.status_code, 설명
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -62,6 +67,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workspace", default=WORKSPACE_ID, help="워크스페이스 ID")
     parser.add_argument("--org", default=ORG_ID, help="조직 ID (알고 있다면)")
     parser.add_argument("--base", default=BASE_URL, help="API 기본 주소")
+    parser.add_argument("--event-type", action="append",
+                        help="이 이름만 시험한다 (여러 번 지정 가능)")
     args = parser.parse_args(argv)
 
     key = args.key or keystore.load_key()
@@ -93,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  (필수 파라미터 after = {after} 로 시험합니다)")
     for 이름, url in 후보:
         결과 = []
-        for 이벤트 in EVENT_TYPE_CANDIDATES:
+        for 이벤트 in (args.event_type or EVENT_TYPE_CANDIDATES):
             status, 설명 = 찔러보기(
                 session, url, key, {"limit": 1, "event_type": 이벤트, "after": after}
             )
@@ -125,14 +132,28 @@ def main(argv: list[str] | None = None) -> int:
 
     print("── 2. 어떤 event_type 이 통하는가 " + "─" * 39)
     통과 = []
-    for 이름 in EVENT_TYPE_CANDIDATES:
+    for 이름 in (args.event_type or EVENT_TYPE_CANDIDATES):
         status, 설명 = 찔러보기(
             session, 성공한주소, key, {"limit": 1, "event_type": 이름, "after": after}
         )
         표시 = "정상" if status == 200 else str(status)
-        print(f"  [{표시:>4}] {이름:<20} {설명[:90]}")
+        print(f"  [{표시:>4}] {이름:<20} {설명}")
         if status == 200:
             통과.append(이름)
+    print()
+    print("── 3. 서버에 허용되는 event_type 을 직접 물어보기 " + "─" * 22)
+    print("  (일부러 없는 값을 보내면 API 가 허용 목록을 알려주는 경우가 있습니다)")
+    상태, _설명, 본문 = 찔러보기(
+        session, 성공한주소, key,
+        {"limit": 1, "event_type": "__SHOW_ALLOWED_VALUES__", "after": after},
+        원본=True,
+    )
+    print(f"  [{상태}] 서버가 보낸 응답 전체:")
+    print("  " + "-" * 70)
+    for 줄 in (본문 or "(본문 없음)").splitlines() or ["(빈 응답)"]:
+        for i in range(0, len(줄), 100):
+            print("  " + 줄[i:i + 100])
+    print("  " + "-" * 70)
     print()
     print("── 결과 " + "─" * 64)
     print(f"  쓸 수 있는 주소      : {성공한주소}")
