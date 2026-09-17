@@ -22,7 +22,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import requests  # noqa: E402
 
 import keystore  # noqa: E402
-from settings import BASE_URL, EVENT_TYPE_CANDIDATES, ORG_ID, WORKSPACE_ID  # noqa: E402
+from settings import (  # noqa: E402
+    BASE_URL,
+    EVENT_TYPE_CANDIDATES,
+    ORG_ID,
+    RETENTION_DAYS,
+    WORKSPACE_ID,
+)
+from compliance import since_days  # noqa: E402
 
 
 def 찔러보기(session, url: str, key: str, params: dict) -> tuple[int | None, str]:
@@ -79,12 +86,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.org:
         후보.append(("조직 스코프", f"{args.base}/organizations/{args.org}/logs"))
 
+    # 이 API 는 event_type 과 after 를 필수로 요구한다(빠지면 422).
+    after = since_days(RETENTION_DAYS)
     성공한주소 = None
     print("── 1. 어느 주소가 통하는가 " + "─" * 46)
+    print(f"  (필수 파라미터 after = {after} 로 시험합니다)")
     for 이름, url in 후보:
-        status, 설명 = 찔러보기(session, url, key, {"limit": 1})
+        결과 = []
+        for 이벤트 in EVENT_TYPE_CANDIDATES:
+            status, 설명 = 찔러보기(
+                session, url, key, {"limit": 1, "event_type": 이벤트, "after": after}
+            )
+            결과.append((status, 이벤트, 설명))
+            if status == 200:
+                break
+            if status in (401, 403, 404) or status is None:
+                break        # 키/주소 문제면 다른 event_type 을 봐도 의미가 없다
+        status, 이벤트, 설명 = 결과[-1]
         표시 = "정상" if status == 200 else str(status)
-        print(f"  [{표시:>4}] {이름}")
+        print(f"  [{표시:>4}] {이름}  (event_type={이벤트})")
         print(f"         {url}")
         print(f"         → {설명}")
         if status == 200 and 성공한주소 is None:
@@ -98,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  403 → 그 키에 '규정 준수 로깅 플랫폼(Compliance Logs Platform)' 읽기")
         print("        권한이 있는지 확인하세요.")
         print("  404 → 워크스페이스/조직 ID 가 맞는지 확인하세요.")
+        print("  422 → 필수 파라미터(event_type, after)가 빠졌습니다. 프로그램 버그이니 알려주세요.")
         print("  연결 실패 → 회사 방화벽/프록시가 api.chatgpt.com 을 막고 있을 수 있습니다.")
         print()
         return 1
@@ -105,7 +126,9 @@ def main(argv: list[str] | None = None) -> int:
     print("── 2. 어떤 event_type 이 통하는가 " + "─" * 39)
     통과 = []
     for 이름 in EVENT_TYPE_CANDIDATES:
-        status, 설명 = 찔러보기(session, 성공한주소, key, {"limit": 1, "event_type": 이름})
+        status, 설명 = 찔러보기(
+            session, 성공한주소, key, {"limit": 1, "event_type": 이름, "after": after}
+        )
         표시 = "정상" if status == 200 else str(status)
         print(f"  [{표시:>4}] {이름:<20} {설명[:90]}")
         if status == 200:

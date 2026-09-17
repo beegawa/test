@@ -11,8 +11,11 @@ def test_워크스페이스_스코프_경로와_인증_헤더(client, session):
     client.validate()
     call = session.calls[0]
     assert call["url"] == "https://example.test/v1/compliance/workspaces/ws_1/logs"
-    assert call["params"] == {"limit": 1}
     assert call["headers"]["Authorization"] == "Bearer sk-test-key"
+    # event_type 과 after 는 이 API 의 필수 파라미터다 (빠지면 422)
+    assert call["params"]["limit"] == 1
+    assert call["params"]["event_type"]
+    assert call["params"]["after"].endswith("Z")
 
 
 def test_조직_ID_가_있으면_조직_스코프를_쓴다(session):
@@ -121,4 +124,37 @@ def test_연결_실패는_재시도_후_ComplianceError(client, session):
 def test_JSON_이_아닌_응답은_오류로_본다(client, session):
     session.get = lambda *a, **k: FakeResponse(200, text="<html>")
     with pytest.raises(ComplianceError):
+        client.validate()
+
+
+def test_필수_파라미터가_빠지면_422_를_설명과_함께_올린다(client, session):
+    from conftest import FakeResponse
+    from compliance import ParameterError
+
+    session.get = lambda *a, **k: FakeResponse(422, body={"detail": [
+        {"type": "missing", "loc": ["query", "event_type"], "msg": "Field required"},
+        {"type": "missing", "loc": ["query", "after"], "msg": "Field required"},
+    ]})
+    with pytest.raises(ParameterError) as caught:
+        client.list_page()
+    assert "422" in str(caught.value)
+    assert "query.event_type: Field required" in str(caught.value)
+
+
+def test_목록_조회는_after_를_항상_채워_보낸다(client, session):
+    session.pages = [{"data": [], "has_more": False}]
+    client.list_page(event_type="CONVERSATION_LOG")
+    assert session.calls[0]["params"]["after"].endswith("Z")
+
+
+def test_통하는_event_type_하나만_있어도_검증은_통과한다(client, session):
+    session.event_types_ok = {"AUTH_LOG"}          # 앞 후보들은 전부 400
+    assert client.validate()["event_type"] == "AUTH_LOG"
+
+
+def test_모든_후보가_400_이면_마지막_오류를_올린다(client, session):
+    from compliance import BadRequestError
+
+    session.event_types_ok = set()
+    with pytest.raises(BadRequestError):
         client.validate()

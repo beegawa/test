@@ -64,11 +64,17 @@ class StubHandler(BaseHTTPRequestHandler):
             body = "\n".join(json.dumps(r, ensure_ascii=False) for r in LOGS[tail])
             return self._send(200, body, content_type="application/jsonl")
 
-        if params.get("event_type") not in (None, "CONVERSATION_LOG"):
+        # 실제 API 와 같이 event_type / after 를 필수로 요구한다 (빠지면 422)
+        missing = [f for f in ("event_type", "after") if not params.get(f)]
+        if missing:
+            return self._send(422, {"detail": [
+                {"type": "missing", "loc": ["query", f], "msg": "Field required"} for f in missing
+            ]})
+        if params.get("event_type") != "CONVERSATION_LOG":
             return self._send(400, {"error": "unknown event_type"})
         if params.get("limit") == "1":               # 키 검증 / 후보 탐지
             return self._send(200, {"data": [], "has_more": False})
-        if not params.get("after") or "PAGE2" not in params.get("after", ""):
+        if "PAGE2" not in params.get("after", ""):
             return self._send(200, {"data": [{"id": "log_1"}], "has_more": True,
                                     "last_end_time": "2026-09-16T02:00:00Z-PAGE2"})
         return self._send(200, {"data": [{"id": "log_2"}], "has_more": False,

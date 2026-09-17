@@ -20,10 +20,12 @@ import requests
 
 from settings import (
     BASE_URL,
+    EVENT_TYPE_CANDIDATES,
     HTTP_TIMEOUT,
     MAX_RETRIES,
     ORG_ID,
     PAGE_LIMIT,
+    RETENTION_DAYS,
     WORKSPACE_ID,
 )
 
@@ -43,6 +45,14 @@ class ForbiddenError(ComplianceError):
     """403 - 키에 '규정 준수 로깅 플랫폼' 읽기 권한이 없다."""
 
 
+class BadRequestError(ComplianceError):
+    """400 - 값이 이 워크스페이스에서 통하지 않는다(대개 event_type)."""
+
+
+class ParameterError(ComplianceError):
+    """422 - 필수 쿼리 파라미터가 빠졌거나 값이 잘못되었다."""
+
+
 class RateLimitError(ComplianceError):
     """429 - 재시도를 다 쓰고도 레이트리밋이 풀리지 않았다."""
 
@@ -58,6 +68,11 @@ def to_iso(moment: datetime) -> str:
 def since_days(days: int) -> str:
     """지금부터 days 일 전 시각(ISO)."""
     return to_iso(datetime.now(timezone.utc) - timedelta(days=days))
+
+
+def _default_after() -> str:
+    """after 가 지정되지 않았을 때 쓰는 기본값 - 보관 기간 전체(30일)."""
+    return since_days(RETENTION_DAYS)
 
 
 @dataclass
@@ -155,6 +170,14 @@ class ComplianceClient:
                     " 없습니다. (403) - 관리자 콘솔에서 키의 권한을 확인하세요."
                     + _server_says(response)
                 )
+            if status == 400:
+                raise BadRequestError(
+                    "요청이 거절되었습니다. (400)" + _server_says(response)
+                )
+            if status == 422:
+                raise ParameterError(
+                    "요청 파라미터가 잘못되었습니다. (422)" + _server_says(response)
+                )
             if status == 404:
                 raise ComplianceError(
                     f"주소를 찾지 못했습니다. (404) 워크스페이스/조직 ID 가 맞는지 확인하세요."
@@ -181,24 +204,42 @@ class ComplianceClient:
         raise ComplianceError(f"{url} 요청에 실패했습니다. {last_error}")  # pragma: no cover
 
     # -------------------------------------------------------------- 공개 API
-    def validate(self) -> dict:
-        """limit=1 로 한 번 호출해 키가 실제로 쓸 수 있는지 확인한다."""
-        response = self._request(f"{self.scope_path}/logs", params={"limit": 1})
-        body = _json(response)
-        return {
-            "ok": True,
-            "scope": self.scope_label,
-            "sample_count": len(body.get("data") or []),
-        }
+    def validate(self, candidates: list[str] | None = None) -> dict:
+        """키가 실제로 쓸 수 있는지 확인한다.
 
-    def probe_event_type(self, event_type: str) -> bool:
-        """해당 event_type 이 이 워크스페이스에서 통하는지 limit=1 로 시험한다."""
+        이 API 는 event_type 과 after 를 필수로 요구하므로(빠지면 422), 후보
+        event_type 을 하나씩 넣어 보고 **하나라도 200 이면 통과**로 본다.
+        키 자체가 문제인 401/403 은 바로 올려 보낸다.
+        """
+        after = _default_after()
+        last_error: ComplianceError | None = None
+        for event_type in (candidates or EVENT_TYPE_CANDIDATES):
+            try:
+                body = _json(self._request(
+                    f"{self.scope_path}/logs",
+                    params={"limit": 1, "event_type": event_type, "after": after},
+                ))
+            except (BadRequestError, ParameterError) as exc:
+                last_error = exc
+                log.info("event_type %s 로는 확인되지 않음: %s", event_type, exc)
+                continue
+            return {
+                "ok": True,
+                "scope": self.scope_label,
+                "event_type": event_type,
+                "sample_count": len(body.get("data") or []),
+            }
+        raise last_error or ComplianceError("어떤 event_type 으로도 응답을 받지 못했습니다.")
+
+    def probe_event_type(self, event_type: str, *, after: str | None = None) -> bool:
+        """해당 event_type 이 이 워크스페이스에서 통하는지 시험한다."""
         try:
-            self._request(f"{self.scope_path}/logs", params={"limit": 1, "event_type": event_type})
+            self._request(
+                f"{self.scope_path}/logs",
+                params={"limit": 1, "event_type": event_type, "after": after or _default_after()},
+            )
             return True
-        except (AuthError, ForbiddenError):
-            raise
-        except ComplianceError as exc:
+        except (BadRequestError, ParameterError) as exc:
             log.info("event_type %s 사용 불가: %s", event_type, exc)
             return False
 
@@ -211,11 +252,10 @@ class ComplianceClient:
     def list_page(
         self, *, event_type: str | None = None, after: str | None = None, limit: int = PAGE_LIMIT
     ) -> Page:
-        params: dict = {"limit": limit}
+        # event_type 과 after 는 이 API 의 필수 파라미터다. 빠지면 422 가 난다.
+        params: dict = {"limit": limit, "after": after or _default_after()}
         if event_type:
             params["event_type"] = event_type
-        if after:
-            params["after"] = after
         body = _json(self._request(f"{self.scope_path}/logs", params=params))
         ids = [item.get("id") for item in (body.get("data") or []) if isinstance(item, dict) and item.get("id")]
         return Page(
@@ -301,6 +341,17 @@ def _server_says(response) -> str:
         if isinstance(body, dict):
             error = body.get("error")
             message = (error.get("message") if isinstance(error, dict) else error) or body.get("message") or ""
+            detail = body.get("detail")
+            if not message and detail:
+                # 예: [{"loc":["query","event_type"],"msg":"Field required"}, ...]
+                if isinstance(detail, list):
+                    message = "; ".join(
+                        f"{'.'.join(str(x) for x in (item.get('loc') or []))}: {item.get('msg')}"
+                        if isinstance(item, dict) else str(item)
+                        for item in detail
+                    )
+                else:
+                    message = str(detail)
     except Exception:
         message = ""
     if not message:
