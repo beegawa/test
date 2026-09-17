@@ -26,16 +26,16 @@ KEY = "sk-admin-e2e-0001"
 # 사용자 2명 × 각 로그 2줄. 마지막 페이지에서 has_more 가 꺼진다.
 LOGS = {
     "log_1": [
-        {"id": "e1", "event_type": "CONVERSATION_LOG", "created_at": "2026-09-16T01:00:00Z",
+        {"id": "e1", "event_type": "AUDIT_LOG", "created_at": "2026-09-16T01:00:00Z",
          "user_email": "hong@shinwon.com",
          "messages": [{"role": "user", "content": "휴가 규정 알려줘"},
                       {"role": "assistant", "content": "취업규칙 12조를 보세요."}]},
-        {"id": "e2", "event_type": "CONVERSATION_LOG", "created_at": "2026-09-16T02:00:00Z",
+        {"id": "e2", "event_type": "AUDIT_LOG", "created_at": "2026-09-16T02:00:00Z",
          "user_email": "hong@shinwon.com",
          "messages": [{"role": "user", "content": "영문 메일 다듬어줘"}]},
     ],
     "log_2": [
-        {"id": "e3", "event_type": "CONVERSATION_LOG", "created_at": "2026-09-16T03:00:00Z",
+        {"id": "e3", "event_type": "AUDIT_LOG", "created_at": "2026-09-16T03:00:00Z",
          "user_email": "kim@shinwon.com",
          "messages": [{"role": "user", "content": "매출 보고서 양식 만들어줘"}]},
     ],
@@ -70,7 +70,7 @@ class StubHandler(BaseHTTPRequestHandler):
             return self._send(422, {"detail": [
                 {"type": "missing", "loc": ["query", f], "msg": "Field required"} for f in missing
             ]})
-        if params.get("event_type") != "CONVERSATION_LOG":
+        if params.get("event_type") != "AUDIT_LOG":
             return self._send(400, {"error": "unknown event_type"})
         if params.get("limit") == "1":               # 키 검증 / 후보 탐지
             return self._send(200, {"data": [], "has_more": False})
@@ -138,7 +138,7 @@ def test_키저장부터_엑셀까지_한_번에(cli):
     assert cli.post("/api/pull", json={"days": 7}).status_code == 202
     body = 수집완료까지(cli)
     result = body["pull"]["result"]
-    assert result["event_types"] == ["CONVERSATION_LOG"]
+    assert result["event_types"] == ["AUDIT_LOG"]
     assert (result["fetched"], result["records"], result["saved"]) == (2, 3, 3)
     assert not result["errors"]
     assert body["stats"]["total"] == 3

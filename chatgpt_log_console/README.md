@@ -67,6 +67,25 @@ python3 app.py --db D:/logs.db  # DB 위치 지정
 결과는 DB 에 기억해 두고, [event_type 다시 탐지] 버튼으로 언제든 다시 확인할 수 있습니다.
 하나도 통하지 않으면 **필터 없이 전체 이벤트**를 받습니다.
 
+### 지금까지 확인된 것 (2026-09, 실제 워크스페이스)
+
+| 공식 분류 | event_type | 상태 |
+|---|---|---|
+| Audit | `AUDIT_LOG` | ✅ |
+| Auth | `AUTH_LOG` | ✅ |
+| App | `APP_LOG` | ✅ |
+| App Auth | `APP_AUTH_LOG` | ✅ |
+| Codex | `CODEX_LOG` | ✅ |
+| Codex Security | `CODEX_SECURITY_LOG` | ✅ |
+| **Conversation** | **미확정** | `CONVERSATION_LOG` · `CHAT_LOG` · `MESSAGE_LOG` 모두 `Invalid event_type` |
+
+대화 내용 로그만 이름을 못 찾았습니다. `explore_api.py` 로 API 스키마·다른 엔드포인트·
+실제 로그 내용까지 훑어 계속 찾습니다.
+
+```bash
+python3 explore_api.py --key sk-admin-...    # 스키마 / 다른 경로 / 로그 속 내용
+```
+
 **이름을 모를 때는 `sweep_event_types.py` 로 한 번에 훑습니다.** 그럴듯한 이름 49개를 시험해
 응답으로 판별합니다.
 

@@ -90,7 +90,7 @@ def test_키가_없으면_수집은_401(cli):
 # ---------------------------------------------------------------- 수집
 def test_수집하면_DB_에_쌓이고_미리보기가_나온다(cli, session):
     cli.post("/api/save-key", json={"key": "sk-admin-1234567890"})
-    session.event_types_ok = {"CONVERSATION_LOG"}
+    session.event_types_ok = {"AUDIT_LOG"}
     session.pages = [페이지(["log_1"])]
     session.logs["log_1"] = jsonl(
         {"id": "e1", "created_at": "2026-09-16T00:00:00Z", "user_email": "a@x.com", "content": "안녕"}
@@ -128,7 +128,7 @@ def test_수집_중_같은_요청은_409(cli, session, monkeypatch):
 
 def test_수집_실패는_화면에_오류로_남는다(cli, session):
     cli.post("/api/save-key", json={"key": "sk-admin-1234567890"})
-    session.event_types_ok = {"CONVERSATION_LOG"}
+    session.event_types_ok = {"AUDIT_LOG"}
     session.status_queue = [401]
     cli.post("/api/pull", json={"days": 1})
     body = 수집완료까지(cli)

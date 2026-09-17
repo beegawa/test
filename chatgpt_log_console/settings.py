@@ -32,20 +32,16 @@ ORG_ID = os.environ.get("CHATGPT_ORG_ID") or None
 # App / Auth / App Auth. 확인된 실제 값은 AUTH_LOG 뿐이라 같은 규칙(<이름>_LOG)으로
 # 후보를 넓혀 둔다. diagnose.py 로 어떤 값이 통하는지 확인할 수 있다.
 _DEFAULT_EVENT_TYPES = [
-    "CONVERSATION_LOG",
-    "CONVERSATIONS_LOG",
-    "CONVERSATION",
-    "CHAT_LOG",
-    "MESSAGE_LOG",
-    "MESSAGE",
-    "CHAT_COMPLETION_LOG",
-    "CODEX_LOG",
-    "CODEX_SECURITY_LOG",
+    # 실제 워크스페이스에서 200 을 받은 것들 (2026-09 확인)
+    "AUDIT_LOG",
+    "AUTH_LOG",
     "APP_LOG",
     "APP_AUTH_LOG",
-    "AUDIT_LOG",
-    "FILE_LOG",
-    "AUTH_LOG",
+    "CODEX_LOG",
+    "CODEX_SECURITY_LOG",
+    # 대화 내용 로그의 이름은 아직 확정되지 않았다.
+    # CONVERSATION_LOG / CHAT_LOG / MESSAGE_LOG 는 "Invalid event_type" 으로 거절됐다.
+    # sweep_event_types.py 와 explore_api.py 로 계속 찾는 중.
 ]
 
 # 정확한 이름을 알아내면 코드를 고치지 않고도 쓸 수 있게 환경변수로 덮어쓸 수 있다.

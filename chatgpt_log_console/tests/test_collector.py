@@ -12,7 +12,7 @@ def 페이지(ids, *, has_more=False, cursor="2026-09-17T00:00:00Z"):
 
 
 def test_받은_로그를_DB_에_쌓고_결과를_알려준다(client, session, store):
-    session.event_types_ok = {"CONVERSATION_LOG"}
+    session.event_types_ok = {"AUDIT_LOG"}
     session.pages = [페이지(["log_1", "log_2"])]
     session.logs["log_1"] = jsonl({"id": "e1", "created_at": "2026-09-16T00:00:00Z",
                                    "user_email": "a@x.com", "content": "안녕"})
@@ -23,7 +23,7 @@ def test_받은_로그를_DB_에_쌓고_결과를_알려준다(client, session, 
 
     result = collect(client, store, days=7)
 
-    assert result.event_types == ["CONVERSATION_LOG"]
+    assert result.event_types == ["AUDIT_LOG"]
     assert (result.listed, result.fetched, result.records, result.saved) == (2, 2, 3, 3)
     assert store.stats()["total"] == 3
     assert [r["user"] for r in store.search()] == ["b@x.com", "b@x.com", "a@x.com"]
