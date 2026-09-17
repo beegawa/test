@@ -15,3 +15,10 @@ webrec.yaml
 tools/
 .venv/
 deploy/data/
+
+# chatgpt_log_console - 대화 로그 DB/키는 절대 커밋하지 않는다
+*.db
+chatgpt_logs.db
+admin_key.json
+.chatgpt_log_console/
+.pytest_cache/

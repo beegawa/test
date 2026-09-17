@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChatGPT 대화 로그 콘솔</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --line:#e3e6ea; --text:#1b1f24; --muted:#6b7280;
+    --accent:#10a37f; --accent-weak:#e7f6f1; --danger:#d14343; --warn:#b26b00;
+    --warn-bg:#fff5e0; --shadow:0 1px 3px rgba(16,24,40,.08);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171a; --card:#1c2024; --line:#2c3238; --text:#e8eaed; --muted:#9aa4b2;
+      --accent:#19c18f; --accent-weak:#123027; --danger:#ff6b6b; --warn:#ffc46b;
+      --warn-bg:#2e2513; --shadow:none;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic","Apple SD Gothic Neo",sans-serif;
+       font-size:14px;line-height:1.5}
+  header{padding:22px 24px 8px;max-width:1180px;margin:0 auto}
+  header h1{margin:0;font-size:20px}
+  header p{margin:4px 0 0;color:var(--muted);font-size:13px}
+  main{max-width:1180px;margin:0 auto;padding:12px 24px 60px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
+        padding:18px 20px;margin-bottom:16px;box-shadow:var(--shadow)}
+  .card h2{margin:0 0 12px;font-size:15px;display:flex;align-items:center;gap:8px}
+  .row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  input,select{background:var(--bg);color:var(--text);border:1px solid var(--line);
+       border-radius:7px;padding:8px 10px;font:inherit;min-width:0}
+  input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px}
+  button{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:9px 14px;
+       font:inherit;font-weight:600;cursor:pointer}
+  button:hover{filter:brightness(1.05)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  button.ghost{background:transparent;color:var(--text);border:1px solid var(--line);font-weight:500}
+  button.danger{background:transparent;color:var(--danger);border:1px solid var(--line);font-weight:500}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;
+        background:var(--accent-weak);color:var(--accent);font-weight:600}
+  .pill.off{background:transparent;color:var(--muted);border:1px solid var(--line)}
+  .muted{color:var(--muted)}
+  .grow{flex:1 1 220px}
+  .notice{background:var(--warn-bg);border:1px solid var(--line);border-left:3px solid var(--warn);
+          border-radius:7px;padding:10px 12px;color:var(--text);font-size:12.5px}
+  .stats{display:flex;flex-wrap:wrap;gap:22px;margin-top:10px}
+  .stat b{display:block;font-size:19px}
+  .stat span{font-size:12px;color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;position:sticky;top:0;background:var(--card)}
+  tbody tr{cursor:pointer}
+  tbody tr:hover{background:var(--accent-weak)}
+  .wrap{max-height:520px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+  .bar{height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:10px}
+  .bar>i{display:block;height:100%;background:var(--accent);width:0;transition:width .3s}
+  .msg{margin-top:10px;font-size:13px}
+  .msg.err{color:var(--danger)}
+  .msg.ok{color:var(--accent)}
+  dialog{border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text);
+         max-width:820px;width:92%;padding:0}
+  dialog::backdrop{background:rgba(0,0,0,.45)}
+  dialog .head{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;
+         border-bottom:1px solid var(--line)}
+  dialog .body{padding:16px 18px;max-height:70vh;overflow:auto}
+  pre{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:12px;
+      white-space:pre-wrap;word-break:break-all;font-size:12px;margin:8px 0 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>회사 ChatGPT 대화 로그 콘솔</h1>
+  <p>워크스페이스 <span id="scope" class="muted">…</span> · 로그 보관 기간 <b id="retention">30</b>일 — 그 전에 받아 두면 계속 남습니다.</p>
+</header>
+
+<main>
+  <!-- 1. 키 설정 -->
+  <section class="card">
+    <h2>1. 관리자 키 <span id="keyPill" class="pill off">확인 중</span></h2>
+    <div id="keyForm" class="row" hidden>
+      <div class="grow">
+        <label for="keyInput">관리자 키 (최초 1회만 입력합니다)</label>
+        <input id="keyInput" type="password" autocomplete="off" placeholder="sk-admin-…" style="width:100%">
+      </div>
+      <button id="saveKey">검증 후 저장</button>
+    </div>
+    <div id="keySaved" class="row" hidden>
+      <div class="grow muted">저장 위치: <b id="keyWhere"></b> — 다시 입력하지 않아도 됩니다.</div>
+      <button id="detectTypes" class="ghost">event_type 다시 탐지</button>
+      <button id="forgetKey" class="danger">키 삭제</button>
+    </div>
+    <div id="keyMsg" class="msg"></div>
+  </section>
+
+  <!-- 2. 가져오기 -->
+  <section class="card">
+    <h2>2. 로그 가져오기</h2>
+    <div class="row">
+      <div>
+        <label for="days">기간</label>
+        <select id="days">
+          <option value="1">최근 1일</option>
+          <option value="7" selected>최근 7일</option>
+          <option value="30">최근 30일 (보관 한계)</option>
+        </select>
+      </div>
+      <div>
+        <label for="mode">방식</label>
+        <select id="mode">
+          <option value="period">선택한 기간 전체</option>
+          <option value="incremental">마지막 수집 이후만 (증분)</option>
+        </select>
+      </div>
+      <button id="pull">로그 가져오기</button>
+      <button id="cancel" class="ghost" hidden>중지</button>
+      <span id="types" class="muted"></span>
+    </div>
+    <div id="bar" class="bar" hidden><i></i></div>
+    <div id="pullMsg" class="msg"></div>
+    <div class="stats" id="stats"></div>
+  </section>
+
+  <!-- 3. 검색 / 결과 -->
+  <section class="card">
+    <h2>3. 저장된 로그 검색</h2>
+    <div class="row">
+      <div><label for="from">시작일</label><input id="from" type="date"></div>
+      <div><label for="to">종료일</label><input id="to" type="date"></div>
+      <div class="grow"><label for="user">사용자</label><input id="user" placeholder="이메일 일부" style="width:100%"></div>
+      <div class="grow"><label for="q">키워드</label><input id="q" placeholder="대화 내용 검색" style="width:100%"></div>
+      <div><label for="eventType">이벤트</label><select id="eventType"><option value="">전체</option></select></div>
+      <button id="search">검색</button>
+      <button id="excel" class="ghost">엑셀 다운로드</button>
+    </div>
+    <div id="searchMsg" class="msg"></div>
+    <div class="wrap" style="margin-top:12px">
+      <table>
+        <thead><tr><th style="width:170px">시간(UTC)</th><th style="width:150px">이벤트</th>
+                   <th style="width:190px">사용자</th><th>내용 요약</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="4" class="muted">아직 조회한 결과가 없습니다.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="notice">
+      결과에는 직원의 실제 대화 내용이 담깁니다. 근로자 모니터링 고지·동의, 목적 제한,
+      접근 권한 최소화를 먼저 확인하세요. 이 화면은 기본적으로 내 PC(127.0.0.1)에서만 열리며,
+      DB 파일은 <span id="dbPath" class="muted"></span> 에 소유자 전용으로 저장됩니다.
+    </div>
+  </section>
+</main>
+
+<dialog id="detail">
+  <div class="head"><b>로그 자세히 보기</b><button class="ghost" onclick="detail.close()">닫기</button></div>
+  <div class="body" id="detailBody"></div>
+</dialog>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let polling = null;
+
+async function api(path, options){
+  const res = await fetch(path, options);
+  const body = await res.json().catch(() => ({}));
+  if(!res.ok) throw new Error(body.error || `요청 실패 (${res.status})`);
+  return body;
+}
+function say(el, text, kind){ el.className = "msg " + (kind || ""); el.textContent = text || ""; }
+
+// ---------------------------------------------------------------- 상태
+async function refresh(){
+  const s = await api("/api/status");
+  $("scope").textContent = s.scope;
+  $("retention").textContent = s.retention_days;
+  $("dbPath").textContent = s.db_path;
+  $("keyForm").hidden = s.key_saved;
+  $("keySaved").hidden = !s.key_saved;
+  $("keyPill").textContent = s.key_saved ? "저장됨" : "필요";
+  $("keyPill").className = "pill" + (s.key_saved ? "" : " off");
+  $("keyWhere").textContent = ({keyring:"OS 자격 증명 저장소", file:"홈 폴더 보호 파일(0600)", env:"환경변수"})[s.key_location] || s.key_location || "";
+  $("types").textContent = s.event_types.length ? "사용 중인 event_type: " + s.event_types.join(", ") : "";
+  fillEventTypes(s.event_types);
+  showStats(s.stats);
+  if(s.pull && s.pull.running) startPolling();
+  return s;
+}
+function showStats(st){
+  $("stats").innerHTML =
+    `<div class="stat"><b>${(st.total||0).toLocaleString()}</b><span>누적 저장 건수</span></div>` +
+    `<div class="stat"><b>${st.users||0}</b><span>사용자 수</span></div>` +
+    `<div class="stat"><b>${(st.oldest||"-").slice(0,10)}</b><span>가장 오래된 기록</span></div>` +
+    `<div class="stat"><b>${(st.newest||"-").slice(0,10)}</b><span>가장 최근 기록</span></div>`;
+}
+function fillEventTypes(types){
+  const sel = $("eventType"), keep = sel.value;
+  sel.innerHTML = '<option value="">전체</option>' + (types||[]).map(t => `<option>${esc(t)}</option>`).join("");
+  sel.value = keep;
+}
+
+// ---------------------------------------------------------------- 키
+$("saveKey").onclick = async () => {
+  const key = $("keyInput").value.trim();
+  if(!key) return say($("keyMsg"), "키를 입력하세요.", "err");
+  $("saveKey").disabled = true; say($("keyMsg"), "API 로 키를 검증하는 중…");
+  try{
+    await api("/api/save-key", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({key})});
+    $("keyInput").value = "";
+    say($("keyMsg"), "키를 저장했습니다. 다시 입력할 필요가 없습니다.", "ok");
+    await refresh();
+  }catch(e){ say($("keyMsg"), e.message, "err"); }
+  finally{ $("saveKey").disabled = false; }
+};
+$("forgetKey").onclick = async () => {
+  if(!confirm("저장된 관리자 키를 삭제할까요?")) return;
+  await api("/api/forget-key", {method:"POST"});
+  say($("keyMsg"), "키를 삭제했습니다.", "ok");
+  refresh();
+};
+$("detectTypes").onclick = async () => {
+  $("detectTypes").disabled = true; say($("keyMsg"), "event_type 후보를 시험 호출하는 중…");
+  try{
+    const r = await api("/api/detect-event-types", {method:"POST"});
+    say($("keyMsg"), r.event_types.length ? "사용 가능: " + r.event_types.join(", ")
+                                          : "통하는 후보가 없어 필터 없이 전체 이벤트를 받습니다.", "ok");
+    await refresh();
+  }catch(e){ say($("keyMsg"), e.message, "err"); }
+  finally{ $("detectTypes").disabled = false; }
+};
+
+// ---------------------------------------------------------------- 수집
+$("pull").onclick = async () => {
+  const body = {days: Number($("days").value), incremental: $("mode").value === "incremental"};
+  $("pull").disabled = true; say($("pullMsg"), "수집을 시작합니다…");
+  try{
+    await api("/api/pull", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    startPolling();
+  }catch(e){ say($("pullMsg"), e.message, "err"); $("pull").disabled = false; }
+};
+$("cancel").onclick = () => api("/api/pull/cancel", {method:"POST"});
+
+function startPolling(){
+  $("pull").disabled = true; $("cancel").hidden = false; $("bar").hidden = false;
+  if(polling) return;
+  polling = setInterval(poll, 1000);
+  poll();
+}
+async function poll(){
+  let s;
+  try{ s = await api("/api/pull/status"); }catch(e){ return; }
+  const p = s.pull.progress;
+  if(p) say($("pullMsg"), `목록 ${p.listed}건 · 다운로드 ${p.fetched}건 · 신규 저장 ${p.saved}건`);
+  $("bar").firstElementChild.style.width = p && p.listed ? Math.min(95, 5 + p.fetched / Math.max(p.listed,1) * 90) + "%" : "20%";
+  showStats(s.stats);
+  if(s.pull.running) return;
+
+  clearInterval(polling); polling = null;
+  $("pull").disabled = false; $("cancel").hidden = true; $("bar").hidden = true;
+  if(s.pull.error){ say($("pullMsg"), s.pull.error, "err"); return; }
+  const r = s.pull.result || {};
+  const extra = [r.truncated ? "상한에 걸려 일부만 받았습니다." : "",
+                 s.pull.cancelled ? "중지했습니다." : "",
+                 (r.errors||[]).length ? `오류 ${r.errors.length}건` : ""].filter(Boolean).join(" ");
+  say($("pullMsg"), `완료 — 다운로드 ${r.fetched||0}건, 레코드 ${r.records||0}건, 신규 저장 ${r.saved||0}건, 중복 ${r.duplicates||0}건. ${extra}`, "ok");
+  if(s.preview) render(s.preview, s.preview_total);
+  refresh();
+}
+
+// ---------------------------------------------------------------- 검색
+function queryString(){
+  const p = new URLSearchParams();
+  const from = $("from").value, to = $("to").value;
+  if(from) p.set("from", from + "T00:00:00Z");
+  if(to)   p.set("to",   to   + "T23:59:59Z");
+  if($("user").value.trim()) p.set("user", $("user").value.trim());
+  if($("q").value.trim())    p.set("q", $("q").value.trim());
+  if($("eventType").value)   p.set("event_type", $("eventType").value);
+  return p.toString();
+}
+$("search").onclick = async () => {
+  say($("searchMsg"), "검색 중…");
+  try{
+    const r = await api("/api/search?" + queryString());
+    render(r.rows, r.total, r.preview_limit);
+  }catch(e){ say($("searchMsg"), e.message, "err"); }
+};
+$("excel").onclick = () => { location.href = "/api/download.xlsx?" + queryString(); };
+$("q").addEventListener("keydown", (e) => { if(e.key === "Enter") $("search").click(); });
+
+function render(rows, total, limit){
+  const body = $("rows");
+  if(!rows.length){ body.innerHTML = '<tr><td colspan="4" class="muted">결과가 없습니다.</td></tr>'; }
+  else{
+    body.innerHTML = rows.map(r => `<tr data-id="${esc(r.id)}">
+        <td>${esc((r.ts||"").replace("T"," ").replace("Z",""))}</td>
+        <td>${esc(r.event_type)}</td><td>${esc(r.user)}</td><td>${esc(r.summary)}</td></tr>`).join("");
+    body.querySelectorAll("tr").forEach(tr => tr.onclick = () => openDetail(tr.dataset.id));
+  }
+  const shown = rows.length, cap = limit || 500;
+  say($("searchMsg"), total > shown
+      ? `전체 ${total.toLocaleString()}건 중 ${shown.toLocaleString()}건 표시 (미리보기 ${cap}건 한도 — 전체는 엑셀로 받으세요)`
+      : `${total.toLocaleString()}건`);
+}
+async function openDetail(id){
+  try{
+    const r = await api("/api/log/" + encodeURIComponent(id));
+    const row = r.row;
+    $("detailBody").innerHTML =
+      `<div class="muted">${esc(row.ts)} · ${esc(row.event_type)} · ${esc(row.user)}</div>
+       <pre>${esc(row.content || "(내용 없음)")}</pre>
+       <div class="muted" style="margin-top:14px">원본 JSON</div><pre>${esc(row.raw)}</pre>`;
+    $("detail").showModal();
+  }catch(e){ alert(e.message); }
+}
+
+refresh().catch(e => say($("keyMsg"), e.message, "err"));
+</script>
+</body>
+</html>

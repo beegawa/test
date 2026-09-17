@@ -1,0 +1,195 @@
+# ChatGPT 대화 로그 웹 콘솔
+
+신원(Shinwon) ChatGPT Enterprise 워크스페이스의 **직원 대화 로그**를 불러와 조회·검색하고,
+**로컬 DB 에 누적**해 30일 보관 기간이 지난 뒤에도 계속 볼 수 있게 하는 사내용 웹 프로그램입니다.
+
+```
+  관리자 키 1회 저장 ──▶ [기간 선택] ──▶ 수집 ──▶ SQLite 누적 ──▶ 검색 / 엑셀
+        (OS 자격 증명)                    │            │
+                                          │            └─ 중복은 자동으로 무시(id 기준)
+                                          └─ 매일 자동 수집(collect.py)으로 30일 한계 극복
+```
+
+## 1. 시작하기
+
+| 환경 | 방법 |
+|---|---|
+| Windows | **`시작_Windows.bat` 더블클릭** — 패키지 설치 후 브라우저가 열립니다 |
+| macOS | **`start_mac.command` 더블클릭** (또는 `bash start_mac.command`) |
+| Linux | `pip install -r requirements.txt && python3 app.py` |
+
+브라우저가 `http://127.0.0.1:5000` 으로 열립니다. **내 PC 에서만** 접속됩니다.
+
+```bash
+python3 app.py --port 8080      # 포트 변경
+python3 app.py --no-open        # 브라우저 자동 열기 끄기
+python3 app.py --db D:/logs.db  # DB 위치 지정
+```
+
+## 2. 화면 사용법
+
+### ① 관리자 키 — 최초 1회만
+
+관리자 콘솔(admin.openai.com) > 인증 정보 > 관리자 키에서 발급한 키를 붙여 넣고 [검증 후 저장].
+
+- 저장 전에 실제 API 를 `limit=1` 로 한 번 호출해 **쓸 수 있는 키인지 확인**합니다.
+  `401`(키 무효) 이나 `403`(권한 없음)이면 이유를 보여주고 **저장하지 않습니다.**
+- 저장 위치는 **OS 자격 증명 저장소**(Windows 자격 증명 관리자 / macOS 키체인)입니다.
+  자격 증명 저장소를 못 쓰는 환경이면 홈 폴더에 **소유자만 읽는 파일(0600)** 로 대신 저장합니다.
+- 키는 코드·설정 파일·로그 어디에도 남지 않습니다. 필요하면 [키 삭제] 로 지웁니다.
+
+> 키에는 **"규정 준수 로깅 플랫폼(Compliance Logs Platform)" 읽기 권한**이 있어야 합니다.
+
+### ② 로그 가져오기
+
+| 선택 | 의미 |
+|---|---|
+| 기간 1 / 7 / 30일 | 최근 N 일치를 받습니다. 30일이 API 보관 한계입니다 |
+| 선택한 기간 전체 | 그 기간을 다시 훑습니다 (이미 있는 건 중복 저장되지 않음) |
+| 마지막 수집 이후만 | 증분 수집 — 마지막으로 받은 지점부터 이어받습니다 |
+
+수집은 백그라운드로 돌아가며 진행 상황(목록 / 다운로드 / 신규 저장 건수)이 실시간 표시됩니다.
+오래 걸리면 [중지] 로 멈출 수 있고, 그때까지 받은 것은 그대로 남습니다.
+
+### ③ 검색 · 엑셀
+
+기간 · 사용자 · 키워드 · 이벤트 종류로 **DB 를 검색**합니다(이 단계에서는 API 를 부르지 않습니다).
+표의 줄을 누르면 대화 전문과 원본 JSON 을 볼 수 있고, 화면에는 최대 500건까지 보여줍니다.
+**전체 결과는 [엑셀 다운로드]** 로 받으세요 — 화면의 검색 조건이 그대로 적용됩니다.
+
+## 3. ⚠️ event_type 확인이 필요합니다
+
+대화 내용에 해당하는 `event_type` 의 **정확한 이름은 관리자 콘솔의 "관리자 API 문서"**
+(admin.openai.com → 리소스 → 관리자 API 문서)에서 확인해야 합니다. 공식 문서에서 확인된 건
+로그인 기록 `AUTH_LOG` 하나뿐입니다.
+
+그때까지는 후보를 `limit=1` 로 하나씩 시험 호출해 **정상 응답(200)하는 것만** 사용합니다.
+결과는 DB 에 기억해 두고, [event_type 다시 탐지] 버튼으로 언제든 다시 확인할 수 있습니다.
+하나도 통하지 않으면 **필터 없이 전체 이벤트**를 받습니다.
+
+정확한 이름을 알게 되면 `settings.py` 의 `EVENT_TYPE_CANDIDATES` **맨 앞에 추가**하세요.
+
+```python
+EVENT_TYPE_CANDIDATES = [
+    "정확한_이름",          # ← 여기에 추가
+    "CONVERSATION_LOG",
+    ...
+]
+```
+
+## 4. 과거 데이터 관리 — 매일 자동 수집
+
+**API 는 30일치만 보관합니다.** 그 전에 받아 두지 않으면 영영 받을 수 없으므로,
+`collect.py` 를 **하루 한 번** 돌리도록 걸어 두세요. 웹 콘솔에서 저장한 키를 그대로 씁니다.
+
+**Windows 작업 스케줄러**
+```
+프로그램:  pythonw.exe
+인수:      "C:\경로\chatgpt_log_console\collect.py" --days 2 --quiet
+시작 위치: C:\경로\chatgpt_log_console
+트리거:    매일 오전 3시 05분
+```
+
+**cron (Linux / macOS)**
+```cron
+5 3 * * * cd /경로/chatgpt_log_console && /usr/bin/python3 collect.py --days 2 --quiet
+```
+
+```bash
+python3 collect.py                 # 증분 수집 (기본)
+python3 collect.py --full --days 7 # 최근 7일을 다시 훑기
+python3 collect.py --json          # 결과를 JSON 으로 출력 (모니터링용)
+```
+
+종료 코드: `0` 정상 · `1` 일부 오류 · `2` 키 없음/설정 오류. 실행 로그는 데이터 폴더의 `collect.log`.
+
+## 5. 저장되는 것
+
+| 파일 | 위치 (기본) | 내용 |
+|---|---|---|
+| `chatgpt_logs.db` | `~/.chatgpt_log_console/` (0600) | 누적된 로그 |
+| `admin_key.json` | 같은 폴더 (0600) | 자격 증명 저장소를 못 쓸 때만 |
+| `collect.log` | 같은 폴더 | 자동 수집 실행 기록 |
+
+`CHATGPT_LOG_DATA_DIR` 환경변수로 폴더를 바꿀 수 있습니다.
+
+```sql
+CREATE TABLE logs(
+    id            TEXT PRIMARY KEY,  -- 로그 고유 id (중복 방지)
+    event_type    TEXT,
+    ts            TEXT,              -- 이벤트 시각 (ISO 8601, UTC)
+    user          TEXT,              -- 사용자 식별자
+    content       TEXT,              -- 검색용 평문 (원본에서 뽑아낸 대화 내용)
+    summary       TEXT,              -- 표에 보여줄 한 줄 요약
+    source_log_id TEXT,              -- 내려받은 로그 파일 id
+    raw           TEXT,              -- 원본 JSON 전체
+    fetched_at    TEXT               -- 우리가 받은 시각
+);
+```
+
+원본 JSON 은 **통째로 보관**합니다. 필드 이름이 달라 `user`·`ts` 를 못 읽었더라도 원본은 남으므로,
+`records.py` 의 후보 키만 늘려 다시 해석할 수 있습니다.
+
+## 6. API 엔드포인트
+
+| 메서드 | 경로 | 기능 |
+|---|---|---|
+| GET | `/api/status` | 키 저장 여부·워크스페이스·누적 통계·수집 상태 |
+| POST | `/api/save-key` | 키를 **검증한 뒤** 저장 |
+| POST | `/api/forget-key` | 키 삭제 |
+| POST | `/api/detect-event-types` | event_type 후보 재탐지 |
+| POST | `/api/pull` | 수집 시작 (백그라운드, `202`) |
+| GET | `/api/pull/status` | 진행률·결과·미리보기 |
+| POST | `/api/pull/cancel` | 수집 중지 |
+| GET | `/api/search` | DB 검색 (`from` `to` `user` `q` `event_type`) |
+| GET | `/api/log/<id>` | 한 건의 전문과 원본 JSON |
+| GET | `/api/users` | 사용자 목록 |
+| GET | `/api/download.xlsx` | 엑셀 — 조건을 주면 그대로, 없으면 마지막 검색 결과 |
+
+## 7. 파일 구성
+
+| 파일 | 역할 |
+|---|---|
+| `app.py` | Flask 웹 서버 · 엔드포인트 · 백그라운드 수집 작업 |
+| `static/index.html` | 화면 (프레임워크 없는 단일 HTML, 다크모드) |
+| `collect.py` | 스케줄러용 헤드리스 증분 수집 |
+| `collector.py` | 수집 절차 (웹·스케줄러가 공유) |
+| `compliance.py` | Compliance API 클라이언트 (페이지네이션 · 재시도 · 오류 구분) |
+| `store.py` | SQLite 누적 저장·검색 |
+| `records.py` | 원본 JSON → 표/DB 행 변환 |
+| `keystore.py` | 관리자 키 보관 |
+| `xlsx_export.py` | 엑셀 내보내기 |
+| `settings.py` | 설정값 (워크스페이스 ID, event_type 후보 등) |
+
+## 8. 보안 · 컴플라이언스 (먼저 확인하세요)
+
+- 결과에는 **직원의 실제 대화 내용(개인정보 포함 가능)** 이 담깁니다.
+  개인정보보호법상 **근로자 모니터링 고지·동의, 목적 제한, 접근 권한 최소화**를 먼저 확인하세요.
+- 기본값은 `127.0.0.1` 바인딩이라 **외부에서 접속되지 않습니다.**
+  사내 서버에 올린다면 **사내 인증(SSO/베이식) + HTTPS + 접근 로그**를 반드시 앞에 두세요.
+  (`--host` 로 바인딩을 열면 프로그램이 경고를 남깁니다.)
+- DB·엑셀 파일은 접근 통제된 위치에 두고, 가능하면 디스크 암호화를 켜세요.
+- 관리자 키는 **최소 권한(규정 준수 로깅 읽기)** 만, 만료일 설정을 권장합니다.
+
+## 9. 테스트
+
+```bash
+python3 -m pytest              # 이 폴더에서
+```
+
+단위 테스트(키 보관·정규화·DB·페이지네이션·재시도)와 함께, **로컬 HTTP 서버로 Compliance API 를
+흉내 내 "키 저장 → 수집 → 검색 → 엑셀" 전 과정을 실제 통신으로 돌리는 통합 테스트**가 있습니다.
+
+## 10. 기획서 대비 구현 메모
+
+| 항목 | 기획서 | 구현 | 이유 |
+|---|---|---|---|
+| `/api/pull` | 동기 호출로 미리보기 반환 | 백그라운드 + `/api/pull/status` 폴링 | 30일 수집은 몇 분씩 걸려 브라우저가 멈춥니다 |
+| UI | `app.py` 에 HTML 내장 | `static/index.html` 분리 | 내용은 동일한 단일 HTML, 수정이 쉽습니다 |
+| 엑셀 | pandas + openpyxl | openpyxl 만 | 표 하나를 쓰는 데 pandas 는 불필요합니다 |
+| DB 스키마 | id·event_type·ts·user·raw | + `content`·`summary`·`source_log_id`·`fetched_at` | 키워드 검색과 증분 수집에 필요합니다 |
+| DB 위치 | 프로그램 폴더 | `~/.chatgpt_log_console/` (0600) | 대화 내용이 저장소에 딸려 들어가는 사고를 막습니다 |
+
+**아직 확정되지 않은 것**: 대화 로그의 정확한 `event_type` 이름(3장)과, 실제 응답의 필드 이름입니다.
+후자는 원본 JSON 을 통째로 보관하고 후보 키로 해석하는 방식이라, 실제 데이터를 한 번 받아 본 뒤
+`records.py` 의 후보 목록만 손보면 됩니다.
