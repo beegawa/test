@@ -1,2 +1,4 @@
 *.bat text eol=crlf
 *.ps1 text eol=crlf
+# CP949(한글 Windows 기본 코드페이지)로 저장한 배치 파일 - 바이트를 그대로 보존한다
+chatgpt_log_console/*.bat -text
