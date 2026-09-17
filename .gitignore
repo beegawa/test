@@ -13,3 +13,5 @@ webrec.yaml
 *.local.yaml
 .webrec/
 tools/
+.venv/
+deploy/data/

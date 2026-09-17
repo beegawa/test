@@ -144,11 +144,12 @@ def browser_path(explicit: str | None = None) -> str | None:
         found = shutil.which(candidate)
         if found:
             return found
-    # Playwright 가 설치한 브라우저 디렉터리 탐색
-    for root in (os.environ.get("PLAYWRIGHT_BROWSERS_PATH"), "/opt/pw-browsers"):
+    # Playwright 가 설치한 브라우저 디렉터리 탐색 (서버 설치 시 여기에 들어간다)
+    home_cache = str(Path.home() / ".cache" / "ms-playwright")
+    for root in (os.environ.get("PLAYWRIGHT_BROWSERS_PATH"), "/opt/pw-browsers", home_cache):
         if not root or not Path(root).is_dir():
             continue
-        for pattern in ("chromium*/**/chrome", "chromium*/**/headless_shell"):
+        for pattern in ("chromium*/**/chrome", "chromium*/**/headless_shell", "chromium*/**/chrome.exe"):
             for path in sorted(Path(root).glob(pattern)):
                 if path.is_file() and os.access(path, os.X_OK):
                     return str(path)

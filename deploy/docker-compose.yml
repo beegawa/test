@@ -1,0 +1,18 @@
+# 서버에서:  docker compose -f deploy/docker-compose.yml up -d
+services:
+  webrec:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: webrec:latest
+    container_name: webrec
+    restart: unless-stopped
+    # 보안: 서버 내부에서만 열고, 접속은 SSH 터널로 한다
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - ./data:/data
+    env_file:
+      - ../.env        # SMTP_HOST / SMTP_USER / SMTP_PASS 등
+    # 크로뮴은 공유 메모리를 많이 쓴다 (기본 64MB 로는 자주 죽는다)
+    shm_size: "1gb"
