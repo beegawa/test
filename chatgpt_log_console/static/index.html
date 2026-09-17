@@ -18,6 +18,8 @@
     }
   }
   *{box-sizing:border-box}
+  /* .row 등이 display 를 지정하면 hidden 속성이 무시된다. 확실히 숨긴다. */
+  [hidden]{display:none !important}
   body{margin:0;background:var(--bg);color:var(--text);
        font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic","Apple SD Gothic Neo",sans-serif;
        font-size:14px;line-height:1.5}
