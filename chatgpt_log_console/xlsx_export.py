@@ -8,13 +8,15 @@ HEADERS = [
     ("ts", "시간(UTC)"),
     ("event_type", "이벤트"),
     ("user", "사용자"),
+    ("action", "동작"),
+    ("conversation_id", "대화 ID"),
     ("summary", "내용 요약"),
     ("content", "내용 전체"),
     ("id", "로그 ID"),
     ("raw", "원본 JSON"),
 ]
 _CELL_LIMIT = 32000  # 엑셀 한 칸 한계(32767)보다 넉넉히 줄여 자른다
-_WIDTHS = [20, 20, 28, 60, 80, 32, 60]
+_WIDTHS = [20, 20, 28, 24, 30, 60, 80, 32, 60]
 
 
 def build_workbook_bytes(rows: list[dict], *, sheet_title: str = "logs") -> bytes:

@@ -132,7 +132,8 @@
       <div><label for="from">시작일</label><input id="from" type="date"></div>
       <div><label for="to">종료일</label><input id="to" type="date"></div>
       <div class="grow"><label for="user">사용자</label><input id="user" placeholder="이메일 일부" style="width:100%"></div>
-      <div class="grow"><label for="q">키워드</label><input id="q" placeholder="대화 내용 검색" style="width:100%"></div>
+      <div class="grow"><label for="q">키워드</label><input id="q" placeholder="내용·동작 검색" style="width:100%"></div>
+      <div><label for="convId">대화 ID</label><input id="convId" placeholder="conversation_id" style="width:200px"></div>
       <div><label for="eventType">이벤트</label><select id="eventType"><option value="">전체</option></select></div>
       <button id="search">검색</button>
       <button id="excel" class="ghost">엑셀 다운로드</button>
@@ -140,9 +141,10 @@
     <div id="searchMsg" class="msg"></div>
     <div class="wrap" style="margin-top:12px">
       <table>
-        <thead><tr><th style="width:170px">시간(UTC)</th><th style="width:150px">이벤트</th>
-                   <th style="width:190px">사용자</th><th>내용 요약</th></tr></thead>
-        <tbody id="rows"><tr><td colspan="4" class="muted">아직 조회한 결과가 없습니다.</td></tr></tbody>
+        <thead><tr><th style="width:160px">시간(UTC)</th><th style="width:140px">이벤트</th>
+                   <th style="width:180px">사용자</th><th style="width:170px">동작</th>
+                   <th>내용 요약</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="5" class="muted">아직 조회한 결과가 없습니다.</td></tr></tbody>
       </table>
     </div>
   </section>
@@ -281,6 +283,7 @@ function queryString(){
   if($("user").value.trim()) p.set("user", $("user").value.trim());
   if($("q").value.trim())    p.set("q", $("q").value.trim());
   if($("eventType").value)   p.set("event_type", $("eventType").value);
+  if($("convId").value.trim()) p.set("conversation_id", $("convId").value.trim());
   return p.toString();
 }
 $("search").onclick = async () => {
@@ -295,11 +298,12 @@ $("q").addEventListener("keydown", (e) => { if(e.key === "Enter") $("search").cl
 
 function render(rows, total, limit){
   const body = $("rows");
-  if(!rows.length){ body.innerHTML = '<tr><td colspan="4" class="muted">결과가 없습니다.</td></tr>'; }
+  if(!rows.length){ body.innerHTML = '<tr><td colspan="5" class="muted">결과가 없습니다.</td></tr>'; }
   else{
     body.innerHTML = rows.map(r => `<tr data-id="${esc(r.id)}">
         <td>${esc((r.ts||"").replace("T"," ").replace("Z",""))}</td>
-        <td>${esc(r.event_type)}</td><td>${esc(r.user)}</td><td>${esc(r.summary)}</td></tr>`).join("");
+        <td>${esc(r.event_type)}</td><td>${esc(r.user)}</td>
+        <td>${esc(r.action)}</td><td>${esc(r.summary)}</td></tr>`).join("");
     body.querySelectorAll("tr").forEach(tr => tr.onclick = () => openDetail(tr.dataset.id));
   }
   const shown = rows.length, cap = limit || 500;
@@ -312,7 +316,9 @@ async function openDetail(id){
     const r = await api("/api/log/" + encodeURIComponent(id));
     const row = r.row;
     $("detailBody").innerHTML =
-      `<div class="muted">${esc(row.ts)} · ${esc(row.event_type)} · ${esc(row.user)}</div>
+      `<div class="muted">${esc(row.ts)} · ${esc(row.event_type)} · ${esc(row.user)}
+          ${row.action ? " · " + esc(row.action) : ""}
+          ${row.conversation_id ? " · 대화 " + esc(row.conversation_id) : ""}</div>
        <pre>${esc(row.content || "(내용 없음)")}</pre>
        <div class="muted" style="margin-top:14px">원본 JSON</div><pre>${esc(row.raw)}</pre>`;
     $("detail").showModal();

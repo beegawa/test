@@ -201,10 +201,12 @@ python3 collect.py --json          # 결과를 JSON 으로 출력 (모니터링�
 
 ```sql
 CREATE TABLE logs(
-    id            TEXT PRIMARY KEY,  -- 로그 고유 id (중복 방지)
-    event_type    TEXT,
+    id            TEXT PRIMARY KEY,  -- 로그 고유 id (중복 방지, 실제로는 event_id)
+    event_type    TEXT,              -- 로그 종류 (요청한 event_type)
     ts            TEXT,              -- 이벤트 시각 (ISO 8601, UTC)
-    user          TEXT,              -- 사용자 식별자
+    user          TEXT,              -- 사용자 (actor.user_email)
+    action        TEXT,              -- 무슨 일이 있었는지 (CONVERSATION_DELETE 등)
+    conversation_id TEXT,            -- 관련 대화 id (있는 로그만)
     content       TEXT,              -- 검색용 평문 (원본에서 뽑아낸 대화 내용)
     summary       TEXT,              -- 표에 보여줄 한 줄 요약
     source_log_id TEXT,              -- 내려받은 로그 파일 id

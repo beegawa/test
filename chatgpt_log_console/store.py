@@ -8,27 +8,29 @@ API 의 로그 보관 기간은 30일이라, 그보다 오래된 데이터는 �
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-SCHEMA = """
+log = logging.getLogger(__name__)
+
+TABLES = """
 CREATE TABLE IF NOT EXISTS logs(
     id            TEXT PRIMARY KEY,   -- 로그 고유 id (중복 방지)
     event_type    TEXT,
     ts            TEXT,               -- 이벤트 시각 (ISO 8601, UTC)
     user          TEXT,               -- 사용자 식별자
-    content       TEXT,               -- 검색용 평문 (원본에서 뽑아낸 대화 내용)
+    action        TEXT,               -- 무슨 일이 있었는지 (CONVERSATION_DELETE 등)
+    conversation_id TEXT,             -- 관련 대화 id (있는 로그만)
+    content       TEXT,               -- 검색용 평문 (원본에서 뽑아낸 내용)
     summary       TEXT,               -- 표에 보여줄 한 줄 요약
     source_log_id TEXT,               -- 내려받은 로그 파일 id
     raw           TEXT,               -- 원본 JSON 전체
     fetched_at    TEXT                -- 우리가 받은 시각
 );
-CREATE INDEX IF NOT EXISTS idx_ts    ON logs(ts);
-CREATE INDEX IF NOT EXISTS idx_user  ON logs(user);
-CREATE INDEX IF NOT EXISTS idx_event ON logs(event_type);
 
 CREATE TABLE IF NOT EXISTS meta(
     key   TEXT PRIMARY KEY,
@@ -36,7 +38,16 @@ CREATE TABLE IF NOT EXISTS meta(
 );
 """
 
-COLUMNS = ("id", "event_type", "ts", "user", "content", "summary", "source_log_id", "raw", "fetched_at")
+# 인덱스는 열이 모두 갖춰진 뒤에 만든다.
+INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_ts    ON logs(ts);
+CREATE INDEX IF NOT EXISTS idx_user  ON logs(user);
+CREATE INDEX IF NOT EXISTS idx_event ON logs(event_type);
+CREATE INDEX IF NOT EXISTS idx_conv  ON logs(conversation_id);
+"""
+
+COLUMNS = ("id", "event_type", "ts", "user", "action", "conversation_id",
+           "content", "summary", "source_log_id", "raw", "fetched_at")
 
 
 def _now() -> str:
@@ -54,9 +65,19 @@ class LogStore:
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         with self._lock:
-            self._conn.executescript(SCHEMA)
+            self._conn.executescript(TABLES)
+            self._migrate()                     # 예전 DB 에 빠진 열을 먼저 채우고
+            self._conn.executescript(INDEXES)   # 그다음에 인덱스를 만든다
             self._conn.commit()
         self._restrict_permissions()
+
+    def _migrate(self) -> None:
+        """예전 버전으로 만든 DB 에 새 열을 채워 넣는다. 기존 데이터는 그대로 둔다."""
+        있는열 = {행[1] for 행 in self._conn.execute("PRAGMA table_info(logs)")}
+        for 열, 정의 in (("action", "TEXT"), ("conversation_id", "TEXT")):
+            if 열 not in 있는열:
+                self._conn.execute(f"ALTER TABLE logs ADD COLUMN {열} {정의}")
+                log.info("DB 에 %s 열을 추가했습니다.", 열)
 
     def _restrict_permissions(self) -> None:
         """DB 파일에는 대화 내용이 담긴다. 소유자만 읽도록 둔다."""
@@ -92,6 +113,8 @@ class LogStore:
                     record.get("event_type") or "",
                     record.get("ts") or "",
                     record.get("user") or "",
+                    record.get("action") or "",
+                    record.get("conversation_id") or "",
                     record.get("content") or "",
                     record.get("summary") or "",
                     record.get("source_log_id") or "",
@@ -119,11 +142,13 @@ class LogStore:
         user: str | None = None,
         keyword: str | None = None,
         event_type: str | None = None,
+        conversation_id: str | None = None,
         fetched_since: str | None = None,
         limit: int = 500,
         offset: int = 0,
     ) -> list[dict]:
-        where, params = self._where(start, end, user, keyword, event_type, fetched_since)
+        where, params = self._where(start, end, user, keyword, event_type, fetched_since,
+                                    conversation_id)
         sql = (
             f"SELECT {', '.join(COLUMNS)} FROM logs {where} "
             "ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?"
@@ -148,14 +173,17 @@ class LogStore:
         user: str | None = None,
         keyword: str | None = None,
         event_type: str | None = None,
+        conversation_id: str | None = None,
         fetched_since: str | None = None,
     ) -> int:
-        where, params = self._where(start, end, user, keyword, event_type, fetched_since)
+        where, params = self._where(start, end, user, keyword, event_type, fetched_since,
+                                    conversation_id)
         with self._lock:
             return int(self._conn.execute(f"SELECT COUNT(*) FROM logs {where}", params).fetchone()[0])
 
     @staticmethod
-    def _where(start, end, user, keyword, event_type, fetched_since=None) -> tuple[str, list]:
+    def _where(start, end, user, keyword, event_type, fetched_since=None,
+               conversation_id=None) -> tuple[str, list]:
         clauses: list[str] = []
         params: list = []
         if start:
@@ -170,13 +198,16 @@ class LogStore:
         if event_type:
             clauses.append("event_type = ?")
             params.append(event_type)
+        if conversation_id:
+            clauses.append("conversation_id = ?")
+            params.append(conversation_id)
         if fetched_since:
             # 이번 수집에서 새로 들어온 것만 보고 싶을 때
             clauses.append("fetched_at >= ?")
             params.append(fetched_since)
         if keyword:
-            clauses.append("(content LIKE ? OR summary LIKE ? OR raw LIKE ?)")
-            params += [f"%{keyword}%"] * 3
+            clauses.append("(content LIKE ? OR summary LIKE ? OR action LIKE ? OR raw LIKE ?)")
+            params += [f"%{keyword}%"] * 4
         return ("WHERE " + " AND ".join(clauses)) if clauses else "", params
 
     def stats(self) -> dict:

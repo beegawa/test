@@ -23,8 +23,12 @@ USER_KEYS = (
 )
 CONTENT_KEYS = (
     "messages", "conversation", "content", "text", "message", "body",
-    "prompt", "completion", "input", "output", "title",
+    "prompt_text", "prompt", "completion", "output", "title",
 )
+# 실제 로그에서 '무슨 일이 있었는지' 를 나타내는 자리들
+ACTION_KEYS = ("action", "detail_type", "log_type", "event_type")
+# 이 값들은 내용이 아니라 요청 파라미터라서 요약에 넣으면 방해가 된다
+NOISE_KEYS = ("_meta", "top", "order_by", "limit", "offset", "cursor")
 _MAX_DEPTH = 4
 
 
@@ -135,23 +139,78 @@ def summarize(text: str, *, limit: int = 160) -> str:
     return one_line if len(one_line) <= limit else one_line[: limit - 1] + "…"
 
 
+def extract_action(raw: dict) -> str:
+    """무슨 일이 있었는지. 예: CONVERSATION_DELETE, logout_success, request"""
+    for 자리 in (raw, raw.get("action_data"), raw.get("event_details")):
+        if not isinstance(자리, dict):
+            continue
+        for key in ACTION_KEYS:
+            값 = 자리.get(key)
+            if isinstance(값, str) and 값:
+                return 값
+    return ""
+
+
+def extract_conversation_id(raw: dict) -> str:
+    값 = _walk(raw, ("conversation_id", "conversationId"))
+    return str(값) if 값 else ""
+
+
+def _고유이름(raw: dict) -> str:
+    """앱 이름·모델처럼 요약에 보탬이 되는 한 조각."""
+    for key in ("app_name", "model", "client_id", "role"):
+        값 = _walk(raw, (key,))
+        if isinstance(값, str) and 값:
+            return 값
+    return ""
+
+
+def describe(raw: dict, content: str) -> str:
+    """표에 한 줄로 보여줄 설명.
+
+    대화 내용이 있으면 그것을, 없으면 '무엇을 했는지'를 보여준다.
+    감사·인증 로그는 내용이 없는 게 정상이라 빈칸으로 두면 안 된다.
+    """
+    조각 = [값 for 값 in (extract_action(raw), _고유이름(raw)) if 값]
+    머리 = " · ".join(dict.fromkeys(조각))
+    본문 = summarize(content, limit=120) if content else ""
+    if 머리 and 본문:
+        return f"{머리} — {본문}"
+    return 머리 or 본문
+
+
+def _내용찾기(raw: dict):
+    """요청 파라미터 같은 잡음은 빼고 실제 내용만 고른다."""
+    값 = _walk(raw, CONTENT_KEYS)
+    if isinstance(값, dict):
+        값 = {키: 하위 for 키, 하위 in 값.items() if 키 not in NOISE_KEYS}
+        if not 값:
+            return None
+    return 값
+
+
 def normalize(raw: dict, *, log_id: str, index: int = 0, event_type_hint: str | None = None) -> dict:
     """원본 한 건 → DB 한 행.
 
     id 는 중복 저장을 막는 기준이다. 원본에 고유 id 가 있으면 그것을 쓰고,
     없으면 '내려받은 로그 id + 줄 번호' 로 만든다.
+
+    로그 종류(event_type)는 **우리가 요청한 값**을 우선한다. 레코드 안의
+    event_type 은 세부 동작(PROMPT_SENT 등)을 담고 있어 종류와 다르기 때문이다.
     """
     own_id = _walk(raw, ID_KEYS)
     record_id = str(own_id) if own_id else f"{log_id}#{index}"
-    event_type = _walk(raw, TYPE_KEYS) or event_type_hint or ""
-    content = flatten_content(_walk(raw, CONTENT_KEYS))
+    event_type = event_type_hint or raw.get("type") or _walk(raw, TYPE_KEYS) or ""
+    content = flatten_content(_내용찾기(raw))
     return {
         "id": record_id,
         "event_type": str(event_type),
         "ts": normalize_ts(_walk(raw, TS_KEYS)),
         "user": normalize_user(_walk(raw, USER_KEYS)),
+        "action": extract_action(raw),
+        "conversation_id": extract_conversation_id(raw),
         "content": content,
-        "summary": summarize(content),
+        "summary": describe(raw, content),
         "source_log_id": log_id,
         "raw": raw,
     }

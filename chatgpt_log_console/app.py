@@ -276,6 +276,7 @@ def _query_from_request() -> dict:
         "user": (args.get("user") or "").strip() or None,
         "keyword": (args.get("q") or "").strip() or None,
         "event_type": (args.get("event_type") or "").strip() or None,
+        "conversation_id": (args.get("conversation_id") or "").strip() or None,
     }
 
 
@@ -307,7 +308,8 @@ def _preview(store: LogStore, state: dict) -> tuple[list[dict], int]:
 
 def _row_view(row: dict) -> dict:
     """화면 표에 필요한 것만. raw 는 자세히 보기에서만 쓰도록 길이를 줄인다."""
-    view = {key: row.get(key, "") for key in ("id", "event_type", "ts", "user", "summary")}
+    view = {key: row.get(key, "")
+            for key in ("id", "event_type", "ts", "user", "action", "conversation_id", "summary")}
     view["content"] = (row.get("content") or "")[:4000]
     return view
 
