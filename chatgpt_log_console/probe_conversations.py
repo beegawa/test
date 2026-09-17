@@ -136,7 +136,90 @@ def main(argv=None) -> int:
             print(f"        {본문[:200]}")
         time.sleep(0.1)
     print()
+
+    # ── 4. 확보한 conversation_id 로 개별 조회 ──────────────────────
+    # 폐기된 것은 '목록(list) 조회' 뿐이다. 개별 대화 조회는 살아 있을 수 있고,
+    # conversation_id 는 AUDIT_LOG / APP_LOG 안에 들어 있다.
+    print("── 4. 실제 conversation_id 로 개별 조회가 되는가 " + "─" * 23)
+    대화ids, 사용자ids = 대화id_모으기(session, base, 스코프, key, 기본after)
+    if not 대화ids:
+        print("  로그에서 conversation_id 를 찾지 못했습니다.")
+    for 대화id in 대화ids[:2]:
+        print(f"\n  ● conversation_id = {대화id}")
+        for 꼴 in ("/conversations/{id}", "/conversations/{id}/messages",
+                   "/conversations/{id}/logs", "/conversations/{id}/transcript",
+                   "/logs/{id}", "/conversation/{id}"):
+            뒤 = 꼴.format(id=대화id)
+            상태, 본문, 헤더 = 요청(session, "GET", f"{base}{스코프}{뒤}", key)
+            allow = 헤더.get("Allow") or 헤더.get("allow") or ""
+            if 상태 == 404 and not allow:
+                print(f"     [404] {꼴}")
+                continue
+            표시 = "★" if 상태 == 200 else " "
+            print(f"    {표시}[{상태}] {꼴} {('Allow: ' + allow) if allow else ''}")
+            print(f"           {본문[:300]}")
+            time.sleep(0.1)
+    for 사용자id in 사용자ids[:1]:
+        print(f"\n  ● user_id = {사용자id}")
+        for 꼴 in ("/users/{id}/conversations", "/users/{id}/logs", "/users/{id}"):
+            뒤 = 꼴.format(id=사용자id)
+            상태, 본문, _ = 요청(session, "GET", f"{base}{스코프}{뒤}", key)
+            표시 = "★" if 상태 == 200 else " "
+            print(f"    {표시}[{상태}] {꼴}")
+            if 상태 != 404:
+                print(f"           {본문[:300]}")
+            time.sleep(0.1)
+    print()
     return 0
+
+
+def 대화id_모으기(session, base, 스코프, key, after, 최대=3):
+    """AUDIT_LOG / APP_LOG 를 받아 그 안의 conversation_id 와 user_id 를 뽑는다."""
+    대화, 사용자 = [], []
+    for 이벤트 in ("APP_LOG", "AUDIT_LOG"):
+        상태, 본문, _ = 요청(session, "GET", f"{base}{스코프}/logs", key,
+                           params={"limit": 3, "event_type": 이벤트, "after": after})
+        if 상태 != 200:
+            continue
+        try:
+            목록 = (json.loads(본문) or {}).get("data") or []
+        except json.JSONDecodeError:
+            continue
+        for 항목 in 목록:
+            로그id = 항목.get("id")
+            if not 로그id:
+                continue
+            상태2, 본문2, _ = 요청(session, "GET", f"{base}{스코프}/logs/{로그id}", key)
+            if 상태2 != 200:
+                continue
+            for 줄 in 본문2.split("} {"):        # 줄바꿈이 공백으로 바뀌어 있을 수 있다
+                for 조각 in (줄, "{" + 줄, 줄 + "}"):
+                    try:
+                        레코드 = json.loads(조각)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    _훑기(레코드, 대화, 사용자)
+                    break
+            if len(대화) >= 최대:
+                break
+        if len(대화) >= 최대:
+            break
+    return 대화, 사용자
+
+
+def _훑기(값, 대화, 사용자, 깊이=0):
+    if 깊이 > 4 or not isinstance(값, dict):
+        return
+    for 키, 하위 in 값.items():
+        if 키 == "conversation_id" and 하위 and 하위 not in 대화:
+            대화.append(하위)
+        if 키 == "user_id" and 하위 and 하위 not in 사용자:
+            사용자.append(하위)
+        if isinstance(하위, dict):
+            _훑기(하위, 대화, 사용자, 깊이 + 1)
+        elif isinstance(하위, list):
+            for 항목 in 하위:
+                _훑기(항목, 대화, 사용자, 깊이 + 1)
 
 
 if __name__ == "__main__":
