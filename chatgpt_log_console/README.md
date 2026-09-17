@@ -12,6 +12,17 @@
 
 ## 1. 시작하기
 
+| 하고 싶은 것 | Windows | macOS / Linux |
+|---|---|---|
+| **대화만 받아 엑셀로** (가장 간단) | **`대화내용_받기.bat` 더블클릭** | `python3 export_conversations.py` |
+| **매일 자동으로 쌓기** | **`자동수집_등록.bat` 더블클릭** | cron 등록 (4장 참고) |
+| 웹 화면에서 검색·조회 | **`시작_Windows.bat` 더블클릭** | `python3 app.py` |
+
+> 한글 파일명이 깨져 보이면 `GET_CHATS.bat` · `SETUP_AUTO.bat` 을 쓰세요 (내용 같음).
+
+**처음 한 번만** `시작_Windows.bat` 으로 관리자 키를 저장하세요. 그다음부터는
+`대화내용_받기.bat` 더블클릭만으로 끝납니다 — 받아서 엑셀을 만들고 바로 열어 줍니다.
+
 | 환경 | 방법 |
 |---|---|
 | Windows | **`시작_Windows.bat` 더블클릭** — 패키지 설치 후 브라우저가 열립니다 |
@@ -206,6 +217,9 @@ python3 diagnose.py --org org_...        # 조직 스코프도 함께 시험
 ```
 
 ```bash
+python3 export_conversations.py    # 대화만 받아 엑셀로 (바탕화면에 저장 후 열기)
+python3 export_conversations.py --days 7 --user hong@shinwon.com
+python3 export_conversations.py --skip-pull --q 매출   # 새로 받지 않고 DB 에서만
 python3 collect.py                 # 증분 수집 (기본)
 python3 collect.py --full --days 7 # 최근 7일을 다시 훑기
 python3 collect.py --json          # 결과를 JSON 으로 출력 (모니터링용)
