@@ -11,6 +11,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+# 파서를 고칠 때마다 올린다. 저장된 DB 의 값이 이 버전보다 낮으면
+# 원본(raw)을 다시 해석해 채운다. 다시 내려받을 필요가 없다.
+PARSER_VERSION = 2
+
 ID_KEYS = ("id", "log_id", "event_id", "message_id", "uuid")
 TYPE_KEYS = ("event_type", "type", "event", "event_name")
 TS_KEYS = (

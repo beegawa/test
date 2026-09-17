@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS logs(
     summary       TEXT,               -- 표에 보여줄 한 줄 요약
     source_log_id TEXT,               -- 내려받은 로그 파일 id
     raw           TEXT,               -- 원본 JSON 전체
-    fetched_at    TEXT                -- 우리가 받은 시각
+    fetched_at    TEXT,               -- 우리가 받은 시각
+    reparsed_at   TEXT                -- 마지막으로 원본을 다시 해석한 시각
 );
 
 CREATE TABLE IF NOT EXISTS meta(
@@ -74,7 +75,8 @@ class LogStore:
     def _migrate(self) -> None:
         """예전 버전으로 만든 DB 에 새 열을 채워 넣는다. 기존 데이터는 그대로 둔다."""
         있는열 = {행[1] for 행 in self._conn.execute("PRAGMA table_info(logs)")}
-        for 열, 정의 in (("action", "TEXT"), ("conversation_id", "TEXT")):
+        for 열, 정의 in (("action", "TEXT"), ("conversation_id", "TEXT"),
+                        ("reparsed_at", "TEXT")):
             if 열 not in 있는열:
                 self._conn.execute(f"ALTER TABLE logs ADD COLUMN {열} {정의}")
                 log.info("DB 에 %s 열을 추가했습니다.", 열)
@@ -132,6 +134,64 @@ class LogStore:
             )
             self._conn.commit()
             return self._conn.total_changes - before
+
+    def reparse(self, normalize_fn, *, batch: int = 500) -> int:
+        """저장해 둔 원본(raw)을 다시 해석해 행을 갱신한다.
+
+        파서를 고쳐도 이미 저장된 행은 그대로라, 표의 '동작'·'내용 요약' 이
+        비어 보인다. 원본은 통째로 보관하므로 다시 내려받지 않고 채울 수 있다.
+        """
+        갱신 = 0
+        while True:
+            with self._lock:
+                행들 = self._conn.execute(
+                    "SELECT id, event_type, raw FROM logs "
+                    "WHERE reparsed_at IS NULL OR reparsed_at = '' LIMIT ?", (batch,)
+                ).fetchall()
+            if not 행들:
+                break
+            표시 = _now()
+            묶음 = []
+            for 행 in 행들:
+                try:
+                    원본 = json.loads(행["raw"] or "{}")
+                except json.JSONDecodeError:
+                    원본 = {}
+                if isinstance(원본, dict) and 원본:
+                    새것 = normalize_fn(원본, log_id="", event_type_hint=행["event_type"] or None)
+                else:
+                    새것 = {}
+                묶음.append((
+                    새것.get("action") or "",
+                    새것.get("conversation_id") or "",
+                    새것.get("content") or "",
+                    새것.get("summary") or "",
+                    새것.get("user") or "",
+                    표시,
+                    행["id"],
+                ))
+            with self._lock:
+                self._conn.executemany(
+                    "UPDATE logs SET action = ?, conversation_id = ?, content = ?, "
+                    "summary = ?, user = COALESCE(NULLIF(?, ''), user), reparsed_at = ? "
+                    "WHERE id = ?", 묶음
+                )
+                self._conn.commit()
+            갱신 += len(묶음)
+        if 갱신:
+            log.info("저장된 로그 %d건을 새 파서로 다시 해석했습니다.", 갱신)
+        return 갱신
+
+    def ensure_parsed(self, normalize_fn, version: int) -> int:
+        """파서 버전이 올라갔으면 한 번만 전체를 다시 해석한다."""
+        if self.get_meta("parser_version") == version:
+            return 0
+        with self._lock:
+            self._conn.execute("UPDATE logs SET reparsed_at = NULL")
+            self._conn.commit()
+        갱신 = self.reparse(normalize_fn)
+        self.set_meta("parser_version", version)
+        return 갱신
 
     # ------------------------------------------------------------ 조회
     def search(

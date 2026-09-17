@@ -23,6 +23,7 @@ import keystore  # noqa: E402
 from collector import collect  # noqa: E402
 from compliance import ComplianceClient, ComplianceError  # noqa: E402
 from settings import DATA_DIR, DEFAULT_MAX_LOGS, db_path  # noqa: E402
+from records import PARSER_VERSION, normalize  # noqa: E402
 from store import LogStore  # noqa: E402
 
 log = logging.getLogger("collect")
@@ -77,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     with LogStore(args.db or db_path()) as store:
+        store.ensure_parsed(normalize, PARSER_VERSION)
         try:
             result = collect(
                 client,

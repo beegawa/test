@@ -94,3 +94,49 @@ def test_DB_파일은_소유자만_읽는다(tmp_path):
     path = tmp_path / "logs.db"
     with LogStore(path):
         assert oct(path.stat().st_mode & 0o777) == "0o600"
+
+
+def test_파서가_바뀌면_저장된_원본을_다시_해석한다(store):
+    """파서를 고쳐도 이미 저장된 행은 그대로라 표가 비어 보인다.
+    원본(raw)은 보관하므로 다시 내려받지 않고 채울 수 있어야 한다."""
+    from records import PARSER_VERSION, normalize
+
+    원본 = {"event_id": "e1", "type": "AUTH_LOG",
+            "actor": {"user_email": "a@example.com"},
+            "timestamp": "2026-09-17T02:27:18Z",
+            "action_data": {"action": "logout_success", "role": "standard-user"}}
+    # 옛날 파서로 저장된 상태 - 동작·요약이 비어 있다
+    store.add_many([{"id": "e1", "event_type": "AUTH_LOG", "ts": "2026-09-17T02:27:18Z",
+                     "user": "a@example.com", "content": "", "summary": "", "raw": 원본}])
+    assert store.search()[0]["summary"] == ""
+
+    갱신 = store.ensure_parsed(normalize, PARSER_VERSION)
+
+    행 = store.search()[0]
+    assert 갱신 == 1
+    assert 행["action"] == "logout_success"
+    assert "logout_success" in 행["summary"]
+    # 같은 버전으로 또 부르면 아무것도 하지 않는다
+    assert store.ensure_parsed(normalize, PARSER_VERSION) == 0
+
+
+def test_원본이_깨져_있어도_재해석이_멈추지_않는다(store):
+    from records import PARSER_VERSION, normalize
+
+    store.add_many([{"id": "깨짐", "event_type": "AUTH_LOG", "ts": "2026-09-17T00:00:00Z",
+                     "user": "a@example.com", "raw": "{이건 JSON 이 아님"},
+                    {"id": "정상", "event_type": "AUTH_LOG", "ts": "2026-09-17T00:00:01Z",
+                     "user": "b@example.com", "raw": {"action": "login_success"}}])
+    store.ensure_parsed(normalize, PARSER_VERSION)
+    assert store.count() == 2
+    assert [행["action"] for 행 in store.search() if 행["id"] == "정상"] == ["login_success"]
+
+
+def test_재해석이_사용자를_지우지_않는다(store):
+    """원본에서 사용자를 못 읽는 경우에도 이미 저장된 값은 남아야 한다."""
+    from records import PARSER_VERSION, normalize
+
+    store.add_many([{"id": "a", "event_type": "AUTH_LOG", "ts": "2026-09-17T00:00:00Z",
+                     "user": "지켜야함@example.com", "raw": {"낯선": "구조"}}])
+    store.ensure_parsed(normalize, PARSER_VERSION)
+    assert store.search()[0]["user"] == "지켜야함@example.com"

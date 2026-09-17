@@ -28,6 +28,7 @@ from settings import (
     WORKSPACE_ID,
     db_path,
 )
+from records import PARSER_VERSION, normalize
 from store import LogStore
 from xlsx_export import build_workbook_bytes
 
@@ -93,6 +94,10 @@ class PullJob:
 def create_app(*, database: str | Path | None = None, client_factory=None) -> Flask:
     app = Flask(__name__, static_folder=None)
     app.config["STORE"] = LogStore(database or db_path())
+    # 파서가 바뀌었으면 저장된 원본을 다시 해석한다(다시 내려받지 않는다).
+    갱신 = app.config["STORE"].ensure_parsed(normalize, PARSER_VERSION)
+    if 갱신:
+        log.info("기존 로그 %d건을 새 파서로 다시 해석했습니다.", 갱신)
     app.config["JOB"] = PullJob()
     app.config["CLIENT_FACTORY"] = client_factory or (lambda key: ComplianceClient(key))
     app.config["LAST_QUERY"] = {}
