@@ -165,12 +165,17 @@ def main(argv: list[str] | None = None) -> int:
     # 대화 로그의 이름을 아직 못 찾았다면, 이어서 더 넓게 훑는다.
     # (따로 실행하는 걸 잊기 쉬워서 여기서 바로 이어 돌린다. --quick 으로 생략)
     if not args.quick:
-        import explore_api
-
         인자 = ["--key", key, "--workspace", args.workspace, "--base", args.base]
         if args.org:
             인자 += ["--org", args.org]
+
+        import explore_api
+        import probe_conversations
+        import sweep_event_types
+
         explore_api.main(인자)
+        probe_conversations.main(인자)
+        sweep_event_types.main(인자)
     return 0
 
 

@@ -79,6 +79,18 @@ python3 app.py --db D:/logs.db  # DB 위치 지정
 | Codex Security | `CODEX_SECURITY_LOG` | ✅ |
 | **Conversation** | **미확정** | `CONVERSATION_LOG` · `CHAT_LOG` · `MESSAGE_LOG` 모두 `Invalid event_type` |
 
+**대화 로그를 찾는 중에 나온 단서** (실제 응답):
+
+```
+[410] /conversations       "...no longer available for this workspace.
+                            Please migrate to the Compliance Logs Platform conversation logs."
+[405] /conversations/logs   Method Not Allowed   ← 경로는 존재한다. GET 이 아닐 뿐.
+[400] /users                Invalid 'after' value ← 존재하지만 after 형식이 다르다
+```
+
+즉 대화 로그는 **이 워크스페이스에 분명히 있고**, 다만 `/logs?event_type=` 방식이 아닙니다.
+`probe_conversations.py` 가 405 응답의 `Allow` 헤더를 읽어 어떤 메서드를 써야 하는지 알아냅니다.
+
 대화 내용 로그만 이름을 못 찾았습니다. `explore_api.py` 로 API 스키마·다른 엔드포인트·
 실제 로그 내용까지 훑어 계속 찾습니다.
 
