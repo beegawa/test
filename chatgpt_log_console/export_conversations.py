@@ -29,7 +29,7 @@ from compliance import ComplianceClient, ComplianceError  # noqa: E402
 from records import PARSER_VERSION, normalize  # noqa: E402
 from settings import DATA_DIR, DEFAULT_MAX_LOGS, RETENTION_DAYS, db_path  # noqa: E402
 from store import LogStore  # noqa: E402
-from xlsx_export import build_workbook_bytes  # noqa: E402
+from xlsx_export import EXCEL_ROW_LIMIT, build_analysis_workbook, write_csv  # noqa: E402
 
 log = logging.getLogger("export")
 대화이벤트 = "CONVERSATION_MESSAGE"
@@ -107,6 +107,10 @@ def main(argv=None) -> int:
     parser.add_argument("--out", help="저장할 폴더 (기본: 바탕화면)")
     parser.add_argument("--db", help="SQLite 파일 경로")
     parser.add_argument("--no-open", action="store_true", help="다 만든 뒤 열지 않는다")
+    parser.add_argument("--csv", action="store_true",
+                        help="엑셀 대신 CSV 로 저장 (아주 클 때. 엑셀에서 바로 열립니다)")
+    parser.add_argument("--with-raw", action="store_true",
+                        help="원본 JSON 열도 함께 넣는다 (파일이 크게 늘어납니다)")
     parser.add_argument("-q", "--quiet", action="store_true")
     args = parser.parse_args(argv)
 
@@ -190,24 +194,44 @@ def main(argv=None) -> int:
         return 1
 
     이름 = "ChatGPT_로그" if args.all else "ChatGPT_대화"
-    파일 = Path(args.out or 기본_저장위치()) / f"{이름}_{datetime.now():%Y%m%d_%H%M}.xlsx"
-    파일.parent.mkdir(parents=True, exist_ok=True)
-    파일.write_bytes(build_workbook_bytes(행들, sheet_title="대화" if not args.all else "로그"))
-    try:
-        파일.chmod(0o600)          # 대화 내용이 담긴다
-    except OSError:                # pragma: no cover
-        pass
+    폴더 = Path(args.out or 기본_저장위치())
+    폴더.mkdir(parents=True, exist_ok=True)
+    때 = f"{datetime.now():%Y%m%d_%H%M}"
+
+    # 엑셀 한 시트에 담을 수 있는 행 수에는 한계가 있다. 넘치면 나눠 저장한다.
+    덩어리들 = [행들[i:i + EXCEL_ROW_LIMIT] for i in range(0, len(행들), EXCEL_ROW_LIMIT)] or [[]]
+    만든파일: list[Path] = []
+    for 번호, 덩어리 in enumerate(덩어리들, start=1):
+        꼬리 = "" if len(덩어리들) == 1 else f"_{번호}"
+        print(f"  엑셀 파일을 만드는 중입니다… ({len(덩어리):,}건){' ' * 20}", end="\r", flush=True)
+        if args.csv:
+            파일 = 폴더 / f"{이름}_{때}{꼬리}.csv"
+            write_csv(덩어리, 파일, with_raw=args.with_raw)
+        else:
+            파일 = 폴더 / f"{이름}_{때}{꼬리}.xlsx"
+            파일.write_bytes(build_analysis_workbook(덩어리, with_raw=args.with_raw))
+        try:
+            파일.chmod(0o600)          # 대화 내용이 담긴다
+        except OSError:                # pragma: no cover
+            pass
+        만든파일.append(파일)
+    print(" " * 60, end="\r")
 
     대화수 = len({행.get("conversation_id") for 행 in 행들 if 행.get("conversation_id")})
     사람수 = len({행.get("user") for 행 in 행들 if 행.get("user")})
     print()
-    print(f"  엑셀로 저장했습니다: {파일}")
+    for 파일 in 만든파일:
+        print(f"  저장했습니다: {파일}  ({파일.stat().st_size / 1024 / 1024:.1f} MB)")
     print(f"  메시지 {len(행들):,}건 · 대화 {대화수:,}개 · 사용자 {사람수}명")
     print(f"  (DB 누적 {통계['total']:,}건 · {통계['oldest'][:10]} ~ {통계['newest'][:10]})")
+    if not args.csv:
+        print()
+        print("  시트 구성 - 대화 / 대화별 / 사용자별 / 일자별")
+        print("  머리글에 필터가 걸려 있어 바로 정렬·집계하실 수 있습니다.")
     print()
 
-    if not args.no_open:
-        열기(파일)
+    if not args.no_open and 만든파일:
+        열기(만든파일[0])
     return 0
 
 

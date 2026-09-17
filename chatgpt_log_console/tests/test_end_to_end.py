@@ -169,8 +169,9 @@ def test_키저장부터_엑셀까지_한_번에(cli):
     assert response.status_code == 200
     sheet = load_workbook(BytesIO(response.data)).active
     assert sheet.max_row == 4                       # 머리글 1 + 3건
-    assert sheet.cell(row=1, column=1).value == "시간(UTC)"
-    assert "hong@shinwon.com" in {sheet.cell(row=r, column=3).value for r in range(2, 5)}
+    머리글 = [칸.value for 칸 in sheet[1]]
+    assert 머리글[:4] == ["시간(한국)", "시간(UTC)", "이벤트", "사용자"]
+    assert "hong@shinwon.com" in {sheet.cell(row=r, column=4).value for r in range(2, 5)}
 
     # 8) 키를 지우면 다시 수집할 수 없다
     cli.post("/api/forget-key")
