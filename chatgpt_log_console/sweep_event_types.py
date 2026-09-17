@@ -29,7 +29,9 @@ from settings import BASE_URL, ORG_ID, RETENTION_DAYS, WORKSPACE_ID  # noqa: E40
 # 공식 안내의 로그 종류(Conversation / Codex / Codex Security / Audit / App / Auth /
 # App Auth)와 AUTH_LOG 의 작명 규칙을 바탕으로 넓게 깔아 본다.
 후보들 = [
-    # 대화 내용 - 확인된 작명 규칙은 <이름>_LOG (AUDIT_LOG, APP_AUTH_LOG 처럼 두 단어도 있음)
+    # 대화 내용 - _LOG 가 붙지 않는 형태를 먼저 본다 (키 권한 이름: "대화 메시지")
+    "CONVERSATION_MESSAGE", "CONVERSATION_EVENT", "CONVERSATION_CONTENT",
+    "MESSAGE_EVENT", "CHAT_MESSAGE", "CONVERSATION_MESSAGES",
     "CONVERSATION_LOG", "CONVERSATIONS_LOG", "CONVERSATION", "CONVERSATIONS",
     "CONVERSATION_CONTENT_LOG", "CONVERSATION_MESSAGE_LOG", "CONVERSATION_EVENT_LOG",
     "CHAT_CONVERSATION_LOG", "CHATGPT_CONVERSATION_LOG", "WORKSPACE_CONVERSATION_LOG",

@@ -77,7 +77,7 @@ python3 app.py --db D:/logs.db  # DB 위치 지정
 | App Auth | `APP_AUTH_LOG` | ✅ |
 | Codex | `CODEX_LOG` | ✅ |
 | Codex Security | `CODEX_SECURITY_LOG` | ✅ |
-| **Conversation** | **미확정** | `CONVERSATION_LOG` · `CHAT_LOG` · `MESSAGE_LOG` 모두 `Invalid event_type` |
+| **Conversation** | **`CONVERSATION_MESSAGE`** | 다른 종류와 달리 **뒤에 `_LOG` 가 붙지 않는다.** 관리자 콘솔의 키 권한 이름("대화 메시지: 읽기")과 짝이 맞는다 |
 
 **대화 로그를 찾는 중에 나온 단서** (실제 응답):
 

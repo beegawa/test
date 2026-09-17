@@ -27,7 +27,7 @@ from compliance import since_days  # noqa: E402
 from settings import BASE_URL, ORG_ID, RETENTION_DAYS, WORKSPACE_ID  # noqa: E402
 
 # 지금까지 통한다고 확인된 것들
-확인된_이벤트 = ["AUDIT_LOG", "AUTH_LOG", "APP_LOG", "APP_AUTH_LOG", "CODEX_LOG", "CODEX_SECURITY_LOG"]
+확인된_이벤트 = ["CONVERSATION_MESSAGE", "AUDIT_LOG", "AUTH_LOG", "APP_LOG", "APP_AUTH_LOG", "CODEX_LOG", "CODEX_SECURITY_LOG"]
 
 스키마_경로 = [
     "/openapi.json", "/docs", "/redoc", "/schema", "/swagger.json",

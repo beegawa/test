@@ -1,3 +1,6 @@
+> **참고**: 이후 `event_type=CONVERSATION_MESSAGE` 가 대화 로그의 이름으로 확인되었습니다.
+> 그 값으로도 비어 있을 때에만 아래 문의를 보내세요.
+
 # OpenAI 지원 문의 초안 — Compliance Logs Platform 대화 로그
 
 > 아래 영문 본문을 그대로 복사해 admin.openai.com 의 지원(Support) 또는 담당 영업/CSM 에게 보내세요.

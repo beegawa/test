@@ -88,6 +88,19 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  조직      : {args.org or '(지정 안 함)'}")
     print()
 
+    # 상대방(OpenAI 지원 등)에게 '무엇을 보냈는지' 그대로 보여줄 수 있게 찍어 둔다.
+    from compliance import since_days as _since
+    from settings import RETENTION_DAYS as _보관
+    _after = _since(_보관)
+    print("── 우리가 보내는 요청 " + "─" * 50)
+    print("  GET {base}/workspaces/{ws}/logs".format(base=args.base.rstrip("/"), ws=args.workspace))
+    print("      ?limit=100")
+    print("      &event_type=<아래에서 시험하는 값>")
+    print(f"      &after={_after}   (ISO 8601, 최근 {_보관}일 이내)")
+    print("  헤더: Authorization: Bearer <관리자 키>")
+    print("  → 응답의 data[].id 로 GET .../logs/{id} 를 따로 받아 JSONL 을 읽습니다.")
+    print()
+
     session = requests.Session()
     후보: list[tuple[str, str]] = []
     if args.workspace:
