@@ -83,7 +83,9 @@ python3 app.py --db D:/logs.db  # DB 위치 지정
 실제 로그 내용까지 훑어 계속 찾습니다.
 
 ```bash
-python3 explore_api.py --key sk-admin-...    # 스키마 / 다른 경로 / 로그 속 내용
+python3 diagnose.py --key sk-admin-...        # 키 확인 + 이름 탐색 + 위치 탐색까지 한 번에
+python3 diagnose.py --key sk-admin-... --quick  # 키 확인만 빠르게
+python3 explore_api.py --key sk-admin-...     # 위치 탐색만 따로
 ```
 
 **이름을 모를 때는 `sweep_event_types.py` 로 한 번에 훑습니다.** 그럴듯한 이름 49개를 시험해

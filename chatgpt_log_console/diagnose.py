@@ -69,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base", default=BASE_URL, help="API 기본 주소")
     parser.add_argument("--event-type", action="append",
                         help="이 이름만 시험한다 (여러 번 지정 가능)")
+    parser.add_argument("--quick", action="store_true",
+                        help="키·이름 확인만 하고 추가 탐색은 건너뛴다")
     args = parser.parse_args(argv)
 
     key = args.key or keystore.load_key()
@@ -159,6 +161,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  쓸 수 있는 주소      : {성공한주소}")
     print(f"  쓸 수 있는 event_type: {', '.join(통과) if 통과 else '(없음 - 필터 없이 전체 수집)'}")
     print()
+
+    # 대화 로그의 이름을 아직 못 찾았다면, 이어서 더 넓게 훑는다.
+    # (따로 실행하는 걸 잊기 쉬워서 여기서 바로 이어 돌린다. --quick 으로 생략)
+    if not args.quick:
+        import explore_api
+
+        인자 = ["--key", key, "--workspace", args.workspace, "--base", args.base]
+        if args.org:
+            인자 += ["--org", args.org]
+        explore_api.main(인자)
     return 0
 
 
