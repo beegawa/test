@@ -143,10 +143,22 @@ class ComplianceClient:
             if status == 200:
                 return response
             if status == 401:
-                raise AuthError("관리자 키가 무효하거나 만료되었습니다. (401)")
+                raise AuthError(
+                    "관리자 키가 무효하거나 만료되었습니다. (401)"
+                    " - 일반 API 키(sk-proj-...)가 아니라 관리자 콘솔 > 인증 정보 >"
+                    " 관리자 키에서 발급한 키여야 합니다."
+                    + _server_says(response)
+                )
             if status == 403:
                 raise ForbiddenError(
-                    "이 키에는 '규정 준수 로깅 플랫폼' 읽기 권한이 없습니다. (403)"
+                    "이 키에는 '규정 준수 로깅 플랫폼(Compliance Logs Platform)' 읽기 권한이"
+                    " 없습니다. (403) - 관리자 콘솔에서 키의 권한을 확인하세요."
+                    + _server_says(response)
+                )
+            if status == 404:
+                raise ComplianceError(
+                    f"주소를 찾지 못했습니다. (404) 워크스페이스/조직 ID 가 맞는지 확인하세요."
+                    f" 요청한 곳: {url}" + _server_says(response)
                 )
             if status == 429 or status >= 500:
                 wait = _retry_after(response) or delay
@@ -162,7 +174,9 @@ class ComplianceClient:
                 delay = min(delay * 2, 30)
                 continue
 
-            raise ComplianceError(f"요청이 거절되었습니다. (HTTP {status}) {_short(response)}")
+            raise ComplianceError(
+                f"요청이 거절되었습니다. (HTTP {status}){_server_says(response)}"
+            )
 
         raise ComplianceError(f"{url} 요청에 실패했습니다. {last_error}")  # pragma: no cover
 
@@ -279,6 +293,17 @@ def _json(response) -> dict:
     return body
 
 
-def _short(response) -> str:
-    text = (getattr(response, "text", "") or "").strip().replace("\n", " ")
-    return text[:200]
+def _server_says(response) -> str:
+    """서버가 보낸 설명을 그대로 덧붙인다. 원인 파악에 이게 제일 중요하다."""
+    message = ""
+    try:
+        body = response.json()
+        if isinstance(body, dict):
+            error = body.get("error")
+            message = (error.get("message") if isinstance(error, dict) else error) or body.get("message") or ""
+    except Exception:
+        message = ""
+    if not message:
+        message = (getattr(response, "text", "") or "").strip().replace("\n", " ")
+    message = str(message)[:300]
+    return f"\n서버 응답: {message}" if message else ""
