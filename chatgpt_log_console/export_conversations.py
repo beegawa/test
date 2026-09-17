@@ -40,7 +40,9 @@ class 진행표시:
 
     def __init__(self, 간격: float = 1.0):
         self.시작 = time.monotonic()
-        self.마지막 = 0.0
+        # 0.0 으로 두면 안 된다. monotonic() 은 부팅 후 경과 시간이라 값이 작을 때
+        # '방금 찍었다' 로 오해해 첫 진행률이 안 나온다.
+        self.마지막 = float("-inf")
         self.간격 = 간격
 
     @staticmethod
