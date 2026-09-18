@@ -15,7 +15,21 @@ Claude 작업 환경(원격 컨테이너)에서 돌린 n8n은 네트워크 정�
 
 ## 설치
 
-### Windows
+### Windows — git 없이 (권장)
+
+`n8n/windows/` 폴더의 **3개 파일을 같은 폴더에 내려받은 뒤**
+`install-n8n.bat` 을 **더블클릭**하면 됩니다.
+
+| 파일 | 역할 |
+|---|---|
+| `install-n8n.bat` | Node.js·n8n 설치 → 환경 구성 → 워크플로우 등록 → 실행 (처음 1회) |
+| `start-n8n.bat` | 두 번째 실행부터 n8n 켜기 |
+| `daily-news-clipping.json` | 워크플로우 (bat 과 같은 폴더에 있어야 함) |
+
+설치가 끝나면 브라우저가 자동으로 http://localhost:5678 을 엽니다.
+명령어를 칠 필요가 없고, git 도 필요 없습니다.
+
+### Windows — PowerShell (git 으로 받은 경우)
 ```powershell
 powershell -ExecutionPolicy Bypass -File install-windows.ps1
 n8n start
@@ -118,7 +132,11 @@ n8n/
 ├── workflows/daily-news-clipping.json   워크플로우 본체 (n8n 임포트용)
 ├── src/organize.js                      '기사 정리' 노드 코드 원본
 ├── test/run-codenodes.js                Code 노드 검증 하네스
-├── install-windows.ps1                  Windows 설치 스크립트
+├── windows/                             Windows 더블클릭 설치 (git 불필요)
+│   ├── install-n8n.bat                  최초 설치 + 실행
+│   ├── start-n8n.bat                    이후 실행
+│   └── daily-news-clipping.json         워크플로우 사본
+├── install-windows.ps1                  Windows 설치 스크립트 (PowerShell)
 ├── install-unix.sh                      macOS/Linux 설치 스크립트
 └── README.md
 ```
