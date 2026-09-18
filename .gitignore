@@ -15,3 +15,6 @@ webrec.yaml
 tools/
 .venv/
 deploy/data/
+
+# n8n 테스트 산출물 (test/run-codenodes.js 로 재생성)
+n8n/test/preview.html

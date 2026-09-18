@@ -1,0 +1,285 @@
+{
+  "id": "newsclip00000001",
+  "name": "매일 뉴스 클리핑 메일",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "매일 07시 실행",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -640,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "s1",
+              "name": "받는사람",
+              "value": "travislee@shinwon.com",
+              "type": "string"
+            },
+            {
+              "id": "s2",
+              "name": "보내는사람",
+              "value": "본인Gmail주소@gmail.com",
+              "type": "string"
+            },
+            {
+              "id": "s3",
+              "name": "수집시간_시간",
+              "value": 24,
+              "type": "number"
+            },
+            {
+              "id": "s4",
+              "name": "카테고리당_최대건수",
+              "value": 8,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "설정",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -420,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 수집할 뉴스 소스 목록.\n// 항목을 추가/삭제하면 클리핑 대상이 바뀝니다.\nconst 소스 = [\n  { 카테고리: '주요뉴스', url: 'https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko' },\n  { 카테고리: '경제',     url: 'https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=ko&gl=KR&ceid=KR:ko' },\n  { 카테고리: 'IT·기술',  url: 'https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=ko&gl=KR&ceid=KR:ko' },\n  { 카테고리: 'AI',       url: 'https://news.google.com/rss/search?q=' + encodeURIComponent('AI 인공지능') + '&hl=ko&gl=KR&ceid=KR:ko' },\n];\n\nconst 설정 = $('설정').first().json;\n\nreturn 소스.map((s) => ({\n  json: {\n    카테고리: s.카테고리,\n    url: s.url,\n    받는사람: 설정.받는사람,\n    보내는사람: 설정.보내는사람,\n    수집시간_시간: 설정.수집시간_시간,\n    카테고리당_최대건수: 설정.카테고리당_최대건수,\n  },\n}));"
+      },
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "뉴스 소스 목록",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "RSS 수집",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        20,
+        0
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// RSS 원본 → 카테고리별 정리 (최근 N시간 / 중복 제거 / 최신순 / 건수 제한)\nconst 설정 = $('설정').first().json;\nconst 시간제한 = Number(설정.수집시간_시간) || 24;\nconst 최대건수 = Number(설정.카테고리당_최대건수) || 8;\nconst 기준시각 = Date.now() - 시간제한 * 60 * 60 * 1000;\n\nconst 정규화 = (s) =>\n  String(s || '')\n    .replace(/<[^>]*>/g, '')\n    .replace(/&nbsp;/g, ' ')\n    .replace(/&amp;/g, '&')\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"')\n    .replace(/&#39;/g, \"'\")\n    .replace(/\\s+/g, ' ')\n    .trim();\n\nconst 입력 = $input.all();\nconst 기사목록 = [];\n\nfor (let i = 0; i < 입력.length; i++) {\n  const j = 입력[i].json;\n  if (!j || (!j.title && !j.link)) continue;\n\n  // 이 기사가 어느 소스(카테고리)에서 왔는지 역추적\n  let 카테고리 = '기타';\n  try {\n    카테고리 = $('뉴스 소스 목록').itemMatching(i)?.json?.카테고리 || '기타';\n  } catch (e) {\n    카테고리 = '기타';\n  }\n\n  const 발행 = j.isoDate || j.pubDate || j.date;\n  const 발행시각 = 발행 ? new Date(발행).getTime() : NaN;\n\n  // 발행일이 없는 기사는 버리지 않고 통과 (일부 피드는 날짜를 주지 않음)\n  if (!Number.isNaN(발행시각) && 발행시각 < 기준시각) continue;\n\n  const 제목 = 정규화(j.title);\n  if (!제목) continue;\n\n  // 구글뉴스 제목의 \" - 언론사\" 꼬리에서 출처 분리\n  const m = 제목.match(/^(.*\\S)\\s+-\\s+([^-]{1,30})$/);\n\n  기사목록.push({\n    카테고리,\n    제목: m ? m[1].trim() : 제목,\n    출처: m ? m[2].trim() : 정규화(j.creator || j.author),\n    링크: j.link || '',\n    요약: 정규화(j.contentSnippet || j.content || '').slice(0, 180),\n    발행시각: Number.isNaN(발행시각) ? Date.now() : 발행시각,\n  });\n}\n\n// 중복 제거 (링크 우선, 없으면 제목)\nconst 본것 = new Set();\nconst 유일 = [];\nfor (const a of 기사목록) {\n  const 키 = (a.링크 || a.제목).split('?')[0];\n  if (본것.has(키)) continue;\n  본것.add(키);\n  유일.push(a);\n}\n\n// 카테고리별 그룹 → 최신순 → 건수 제한\nconst 순서 = ['주요뉴스', '경제', 'IT·기술', 'AI', '기타'];\nconst 그룹 = {};\nfor (const a of 유일) (그룹[a.카테고리] ||= []).push(a);\n\nconst 결과 = [];\nfor (const c of 순서) {\n  if (!그룹[c]?.length) continue;\n  그룹[c].sort((x, y) => y.발행시각 - x.발행시각);\n  결과.push({ 카테고리: c, 기사: 그룹[c].slice(0, 최대건수) });\n}\n\nreturn [\n  {\n    json: {\n      총건수: 결과.reduce((n, g) => n + g.기사.length, 0),\n      카테고리수: 결과.length,\n      그룹: 결과,\n      받는사람: 설정.받는사람,\n      보내는사람: 설정.보내는사람,\n      수집시간_시간: 시간제한,\n    },\n  },\n];\n"
+      },
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "기사 정리",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.총건수 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "기사가 있으면",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        460,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 메일 본문(HTML + 텍스트) 생성\nconst d = $input.first().json;\n\nconst 날짜 = new Intl.DateTimeFormat('ko-KR', {\n  timeZone: 'Asia/Seoul',\n  year: 'numeric',\n  month: 'long',\n  day: 'numeric',\n  weekday: 'long',\n}).format(new Date());\n\nconst esc = (s) =>\n  String(s || '')\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;');\n\nconst 시각 = (ts) =>\n  new Intl.DateTimeFormat('ko-KR', {\n    timeZone: 'Asia/Seoul',\n    hour: '2-digit',\n    minute: '2-digit',\n  }).format(new Date(ts));\n\nconst 색 = {\n  '주요뉴스': '#2563eb',\n  '경제': '#059669',\n  'IT·기술': '#7c3aed',\n  'AI': '#db2777',\n  '기타': '#64748b',\n};\n\nlet 본문 = '';\nlet 텍스트 = `${날짜} 뉴스 클리핑\\n최근 ${d.수집시간_시간}시간 · 총 ${d.총건수}건\\n\\n`;\n\nfor (const g of d.그룹) {\n  const c = 색[g.카테고리] || '#64748b';\n  본문 += `<tr><td style=\"padding:28px 24px 10px\">\n    <span style=\"display:inline-block;background:${c};color:#fff;font-size:12px;font-weight:700;padding:5px 12px;border-radius:20px;letter-spacing:.3px\">${esc(g.카테고리)}</span>\n    <span style=\"color:#94a3b8;font-size:12px;margin-left:8px\">${g.기사.length}건</span>\n  </td></tr>`;\n\n  텍스트 += `\\n[${g.카테고리}]\\n`;\n\n  for (const a of g.기사) {\n    const 메타 = [a.출처, 시각(a.발행시각)].filter(Boolean).join(' · ');\n    본문 += `<tr><td style=\"padding:0 24px 14px\">\n      <div style=\"border-left:3px solid ${c};padding-left:14px\">\n        <a href=\"${esc(a.링크)}\" style=\"color:#0f172a;font-size:15px;font-weight:600;text-decoration:none;line-height:1.45\">${esc(a.제목)}</a>\n        <div style=\"color:#94a3b8;font-size:12px;margin-top:5px\">${esc(메타)}</div>\n        ${a.요약 ? `<div style=\"color:#475569;font-size:13px;line-height:1.6;margin-top:6px\">${esc(a.요약)}</div>` : ''}\n      </div>\n    </td></tr>`;\n\n    텍스트 += `- ${a.제목}${메타 ? ` (${메타})` : ''}\\n  ${a.링크}\\n`;\n  }\n}\n\nconst html = `<!doctype html>\n<html lang=\"ko\"><head><meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head>\n<body style=\"margin:0;padding:0;background:#f1f5f9\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f1f5f9;padding:24px 12px\">\n<tr><td align=\"center\">\n<table role=\"presentation\" width=\"620\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:620px;width:100%;background:#fff;border-radius:14px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Malgun Gothic','맑은 고딕',sans-serif\">\n  <tr><td style=\"background:#0f172a;padding:26px 24px\">\n    <div style=\"color:#fff;font-size:20px;font-weight:700\">오늘의 뉴스 클리핑</div>\n    <div style=\"color:#94a3b8;font-size:13px;margin-top:6px\">${esc(날짜)} · 최근 ${d.수집시간_시간}시간 · 총 ${d.총건수}건</div>\n  </td></tr>\n  ${본문}\n  <tr><td style=\"padding:20px 24px 26px;border-top:1px solid #e2e8f0\">\n    <div style=\"color:#94a3b8;font-size:11px;line-height:1.6\">n8n 자동 발송 · 매일 오전 7시</div>\n  </td></tr>\n</table>\n</td></tr></table>\n</body></html>`;\n\nreturn [\n  {\n    json: {\n      제목: `[뉴스 클리핑] ${날짜} · ${d.총건수}건`,\n      html,\n      텍스트,\n      받는사람: d.받는사람,\n      보내는사람: d.보내는사람,\n      총건수: d.총건수,\n    },\n  },\n];"
+      },
+      "id": "a1000000-0000-4000-8000-000000000007",
+      "name": "메일 본문 생성",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $json.보내는사람 }}",
+        "toEmail": "={{ $json.받는사람 }}",
+        "subject": "={{ $json.제목 }}",
+        "html": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000008",
+      "name": "메일 발송",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        -100
+      ],
+      "credentials": {}
+    },
+    {
+      "parameters": {
+        "jsCode": "// 수집된 기사가 없을 때: 메일을 보내지 않고 로그만 남김\nreturn [{ json: { 결과: '수집된 기사 없음 - 메일 발송 생략', 시각: new Date().toISOString() } }];"
+      },
+      "id": "a1000000-0000-4000-8000-000000000009",
+      "name": "기사 없음",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        120
+      ]
+    }
+  ],
+  "connections": {
+    "매일 07시 실행": {
+      "main": [
+        [
+          {
+            "node": "설정",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "설정": {
+      "main": [
+        [
+          {
+            "node": "뉴스 소스 목록",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "뉴스 소스 목록": {
+      "main": [
+        [
+          {
+            "node": "RSS 수집",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS 수집": {
+      "main": [
+        [
+          {
+            "node": "기사 정리",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "기사 정리": {
+      "main": [
+        [
+          {
+            "node": "기사가 있으면",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "기사가 있으면": {
+      "main": [
+        [
+          {
+            "node": "메일 본문 생성",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "기사 없음",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "메일 본문 생성": {
+      "main": [
+        [
+          {
+            "node": "메일 발송",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Seoul",
+    "saveManualExecutions": true
+  },
+  "tags": [],
+  "versionId": "newsclip-v1-0000-0000-000000000001"
+}
