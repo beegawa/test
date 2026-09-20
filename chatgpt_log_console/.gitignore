@@ -1,0 +1,14 @@
+# 직원 대화가 담긴 파일은 절대 저장소에 올리지 않는다
+*.sqlite
+*.sqlite3
+*.db
+*.db3
+*.jsonl
+*.ndjson
+*.zip
+*.csv
+대화내용_받기.BAT
+
+reports/
+logs/
+.state/

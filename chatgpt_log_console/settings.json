@@ -1,0 +1,16 @@
+{
+  "_설명": "이 폴더의 자동화 동작을 바꾸는 설정 파일입니다. 값만 고치세요.",
+
+  "downloadBat": "대화내용_받기.BAT",
+  "downloadTimeoutMinutes": 120,
+
+  "taskName": "ChatGPT-Monthly-Log-Report",
+  "taskTime": "09:00",
+
+  "reportDir": "reports",
+  "logDir": "logs",
+  "stateDir": ".state",
+
+  "pythonExe": "",
+  "keepLogDays": 365
+}
