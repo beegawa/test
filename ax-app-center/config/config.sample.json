@@ -1,0 +1,41 @@
+{
+  "environment": "test",
+  "tenant": "<tenant>",
+  "clientId": "",
+  "site": {
+    "alias": "ax-app-center",
+    "title": "AX 앱 센터",
+    "lcid": 1042
+  },
+  "people": {
+    "owners": [
+      "<GBI팀 구성원 메일>"
+    ],
+    "reviewers": [
+      "<법인별 AX 담당자 메일>"
+    ],
+    "securityApprover": "<정보보안 담당 메일>",
+    "systemApprovers": {
+      "ERP": "<ERP TFT 담당 메일>",
+      "MES": "<스마트팩토리팀 담당 메일>",
+      "default": "<SI팀 담당 메일>"
+    }
+  },
+  "entities": [
+    "<본사>",
+    "<법인 1>",
+    "<법인 2>"
+  ],
+  "review": {
+    "slaBusinessDays": 5,
+    "recheckMonths": 12,
+    "reminderDaysBefore": 30
+  },
+  "labels": {
+    "bilingual": true
+  },
+  "permissions": {
+    "visitorsCanSubmit": false
+  },
+  "includeRpa": true
+}

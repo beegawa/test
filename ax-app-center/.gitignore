@@ -1,0 +1,3 @@
+# 실제 설정 값(메일 주소, 테넌트, clientId)은 저장소에 넣지 않는다.
+config/config.json
+logs/
